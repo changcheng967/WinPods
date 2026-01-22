@@ -7,13 +7,34 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
+    <Window.SystemBackdrop>
+        <DesktopAcrylicBackdrop/>
+    </Window.SystemBackdrop>
+
     <Grid x:Name="RootGrid">
+        <!-- iOS 26: Transparent background to show acrylic blur -->
         <Grid.Background>
-            <SolidColorBrush Color="#000000"/>
+            <SolidColorBrush Color="Transparent" Opacity="0"/>
         </Grid.Background>
 
-        <Border CornerRadius="32" Background="#1C1C1E" BorderBrush="#2C2C2E" BorderThickness="1" Padding="40,40" Margin="40">
-            <StackPanel HorizontalAlignment="Center" Spacing="24">
+        <!-- iOS 26 Liquid Glass Card -->
+        <Border CornerRadius="44" Padding="48,40" Margin="40">
+            <!-- Translucent glass background -->
+            <Border.Background>
+                <SolidColorBrush Color="#1C1C1E" Opacity="0.85"/>
+            </Border.Background>
+
+            <!-- Specular highlight gradient (brighter at top-left for rim lighting) -->
+            <Border.BorderBrush>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#60FFFFFF" Offset="0"/>
+                    <GradientStop Color="#30FFFFFF" Offset="0.5"/>
+                    <GradientStop Color="#10FFFFFF" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.BorderBrush>
+            <Border.BorderThickness>1.5</Border.BorderThickness>
+
+            <StackPanel HorizontalAlignment="Center" Spacing="28">
                 <!-- AirPods Icon -->
                 <Grid Width="120" Height="100" HorizontalAlignment="Center">
                     <!-- Case Body -->
@@ -56,20 +77,22 @@
                 <!-- Device Name -->
                 <TextBlock x:Name="DeviceNameText"
                            Text="AirPods Pro"
-                           FontSize="24"
+                           FontSize="22"
                            FontWeight="SemiBold"
                            Foreground="White"
                            HorizontalAlignment="Center"
                            TextAlignment="Center"
                            TextWrapping="Wrap"
                            MaxWidth="500"
-                           Margin="0,0,0,10"/>
+                           Margin="0,0,0,8"/>
 
                 <!-- Battery Indicators -->
-                <StackPanel Orientation="Horizontal" Spacing="50">
+                <StackPanel Orientation="Horizontal" Spacing="52">
                     <!-- Left Pod -->
-                    <StackPanel Spacing="12">
+                    <StackPanel Spacing="14">
                         <Grid Width="70" Height="70">
+                            <!-- Outer glow for liquid glass effect -->
+                            <Ellipse x:Name="LeftBatteryGlow" Width="70" Height="70" Fill="#30D158" Opacity="0.15"/>
                             <Ellipse x:Name="LeftBatteryArc" Width="70" Height="70" Stroke="#3A3A3C" StrokeThickness="6" Fill="Transparent"/>
                         </Grid>
                         <TextBlock x:Name="LeftBatteryText" Text="--%" FontSize="24" Foreground="White" HorizontalAlignment="Center"/>
@@ -80,8 +103,10 @@
                     </StackPanel>
 
                     <!-- Right Pod -->
-                    <StackPanel Spacing="12">
+                    <StackPanel Spacing="14">
                         <Grid Width="70" Height="70">
+                            <!-- Outer glow for liquid glass effect -->
+                            <Ellipse x:Name="RightBatteryGlow" Width="70" Height="70" Fill="#30D158" Opacity="0.15"/>
                             <Ellipse x:Name="RightBatteryArc" Width="70" Height="70" Stroke="#3A3A3C" StrokeThickness="6" Fill="Transparent"/>
                         </Grid>
                         <TextBlock x:Name="RightBatteryText" Text="--%" FontSize="24" Foreground="White" HorizontalAlignment="Center"/>
@@ -92,8 +117,10 @@
                     </StackPanel>
 
                     <!-- Case -->
-                    <StackPanel Spacing="12">
+                    <StackPanel Spacing="14">
                         <Grid Width="70" Height="70">
+                            <!-- Outer glow for liquid glass effect -->
+                            <Ellipse x:Name="CaseBatteryGlow" Width="70" Height="70" Fill="#30D158" Opacity="0.15"/>
                             <Ellipse x:Name="CaseBatteryArc" Width="70" Height="70" Stroke="#3A3A3C" StrokeThickness="6" Fill="Transparent"/>
                         </Grid>
                         <TextBlock x:Name="CaseBatteryText" Text="--%" FontSize="24" Foreground="White" HorizontalAlignment="Center"/>
@@ -105,7 +132,7 @@
                 </StackPanel>
 
                 <!-- Connection Status -->
-                <StackPanel Margin="0,10,0,0" Spacing="12">
+                <StackPanel Margin="0,10,0,0" Spacing="14">
                     <!-- Connection Status Indicator -->
                     <Grid HorizontalAlignment="Center">
                         <Ellipse x:Name="ConnectionStatusDot" Width="8" Height="8" Fill="#3A3A3C" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -130,13 +157,13 @@
                 </StackPanel>
 
                 <!-- Noise Control Buttons -->
-                <StackPanel Margin="0,10,0,0" Spacing="12">
+                <StackPanel Margin="0,10,0,0" Spacing="14">
                     <TextBlock Text="Noise Control"
                                FontSize="15"
                                Foreground="#8E8E93"
                                FontWeight="Medium"
                                HorizontalAlignment="Center"/>
-                    <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="14" HorizontalAlignment="Center">
                         <Button x:Name="NoiseCancellationButton"
                                 Content="Noise Cancellation"
                                 Width="140"
@@ -146,7 +173,7 @@
                                 IsEnabled="False"
                                 Click="OnNoiseCancellationClick">
                             <Button.Resources>
-                                <SolidColorBrush x:Key="ButtonBackground" Color="#2C2C2E"/>
+                                <SolidColorBrush x:Key="ButtonBackground" Color="#2C2C2E" Opacity="0.9"/>
                                 <SolidColorBrush x:Key="ButtonForeground" Color="#8E8E93"/>
                             </Button.Resources>
                             <ToolTipService.ToolTip>
@@ -162,7 +189,7 @@
                                 IsEnabled="False"
                                 Click="OnTransparencyClick">
                             <Button.Resources>
-                                <SolidColorBrush x:Key="ButtonBackground" Color="#2C2C2E"/>
+                                <SolidColorBrush x:Key="ButtonBackground" Color="#2C2C2E" Opacity="0.9"/>
                                 <SolidColorBrush x:Key="ButtonForeground" Color="#8E8E93"/>
                             </Button.Resources>
                             <ToolTipService.ToolTip>
@@ -178,7 +205,7 @@
                                 IsEnabled="False"
                                 Click="OnNoiseOffClick">
                             <Button.Resources>
-                                <SolidColorBrush x:Key="ButtonBackground" Color="#2C2C2E"/>
+                                <SolidColorBrush x:Key="ButtonBackground" Color="#2C2C2E" Opacity="0.9"/>
                                 <SolidColorBrush x:Key="ButtonForeground" Color="#8E8E93"/>
                             </Button.Resources>
                             <ToolTipService.ToolTip>

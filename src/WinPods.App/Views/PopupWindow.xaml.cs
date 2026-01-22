@@ -42,16 +42,20 @@ namespace WinPods.App.Views
             // Get compositor for animations
             _compositor = this.Compositor;
 
-            // Set window title
+            // iOS 26 Liquid Glass: Make window borderless
+            ConfigureAsBorderlessWindow();
+            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] Window configured as borderless");
+
+            // Set window title (hidden but good for debugging)
             this.Title = "WinPods";
 
             // Set window size
             AppWindow.Resize(new Windows.Graphics.SizeInt32(800, 1200));
             Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] Window resized");
 
-            // Center the window on screen
-            CenterWindow();
-            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] Window centered");
+            // Position in bottom-right corner (iOS 26 style)
+            PositionBottomRight();
+            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] Positioned bottom-right");
 
             // Subscribe to window activation events
             this.Activated += (s, e) =>
@@ -80,6 +84,57 @@ namespace WinPods.App.Views
             };
 
             Console.WriteLine($"[PopupWindow] ========== CONSTRUCTOR END [{constructorStopwatch.ElapsedMilliseconds}ms] ==========");
+        }
+
+        /// <summary>
+        /// Configures the window as borderless for iOS 26 Liquid Glass effect.
+        /// </summary>
+        private void ConfigureAsBorderlessWindow()
+        {
+            try
+            {
+                // Get the AppWindow's Presenter and configure as borderless
+                var presenter = Microsoft.UI.Windowing.OverlappedPresenter.CreateForDialog();
+                presenter.SetBorderAndTitleBar(false, false);
+
+                // Apply the presenter to the window
+                AppWindow.SetPresenter(presenter);
+                System.Diagnostics.Debug.WriteLine("[PopupWindow] Borderless window configured");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[PopupWindow] Failed to configure borderless: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Positions the window in bottom-right corner above taskbar (iOS 26 style).
+        /// </summary>
+        private void PositionBottomRight()
+        {
+            try
+            {
+                var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id,
+                    Microsoft.UI.Windowing.DisplayAreaFallback.Nearest);
+                if (displayArea != null)
+                {
+                    var workArea = displayArea.WorkArea;
+                    var width = 800;
+                    var height = 1200;
+                    var margin = 16; // Distance from edges
+
+                    // Position in bottom-right corner
+                    var x = workArea.Width - width - margin;
+                    var y = workArea.Height - height - margin;
+
+                    AppWindow.Move(new Windows.Graphics.PointInt32((int)x, (int)y));
+                    System.Diagnostics.Debug.WriteLine($"[PopupWindow] Positioned bottom-right at ({x}, {y})");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[PopupWindow] Failed to position window: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -299,12 +354,14 @@ namespace WinPods.App.Views
             {
                 LeftBatteryText.Text = $"{state.Battery.Left.Percentage}%";
                 UpdateBatteryArc(LeftBatteryArc, state.Battery.Left.Percentage, state.Battery.Left.IsCharging);
+                UpdateBatteryGlow(LeftBatteryGlow, state.Battery.Left.Percentage, state.Battery.Left.IsCharging);
                 LeftChargingIcon.Visibility = state.Battery.Left.IsCharging ? Visibility.Visible : Visibility.Collapsed;
             }
             else
             {
                 LeftBatteryText.Text = "--%";
                 UpdateBatteryArc(LeftBatteryArc, 0, false);
+                UpdateBatteryGlow(LeftBatteryGlow, 0, false);
                 LeftChargingIcon.Visibility = Visibility.Collapsed;
             }
 
@@ -313,12 +370,14 @@ namespace WinPods.App.Views
             {
                 RightBatteryText.Text = $"{state.Battery.Right.Percentage}%";
                 UpdateBatteryArc(RightBatteryArc, state.Battery.Right.Percentage, state.Battery.Right.IsCharging);
+                UpdateBatteryGlow(RightBatteryGlow, state.Battery.Right.Percentage, state.Battery.Right.IsCharging);
                 RightChargingIcon.Visibility = state.Battery.Right.IsCharging ? Visibility.Visible : Visibility.Collapsed;
             }
             else
             {
                 RightBatteryText.Text = "--%";
                 UpdateBatteryArc(RightBatteryArc, 0, false);
+                UpdateBatteryGlow(RightBatteryGlow, 0, false);
                 RightChargingIcon.Visibility = Visibility.Collapsed;
             }
 
@@ -327,12 +386,14 @@ namespace WinPods.App.Views
             {
                 CaseBatteryText.Text = $"{state.Battery.Case.Percentage}%";
                 UpdateBatteryArc(CaseBatteryArc, state.Battery.Case.Percentage, state.Battery.Case.IsCharging);
+                UpdateBatteryGlow(CaseBatteryGlow, state.Battery.Case.Percentage, state.Battery.Case.IsCharging);
                 CaseChargingIcon.Visibility = state.Battery.Case.IsCharging ? Visibility.Visible : Visibility.Collapsed;
             }
             else
             {
                 CaseBatteryText.Text = "--%";
                 UpdateBatteryArc(CaseBatteryArc, 0, false);
+                UpdateBatteryGlow(CaseBatteryGlow, 0, false);
                 CaseChargingIcon.Visibility = Visibility.Collapsed;
             }
 
@@ -376,6 +437,33 @@ namespace WinPods.App.Views
             }
 
             arc.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+        }
+
+        /// <summary>
+        /// Updates the battery glow effect for iOS 26 liquid glass design.
+        /// </summary>
+        private void UpdateBatteryGlow(Ellipse glow, byte percentage, bool isCharging)
+        {
+            // Update glow color based on battery level
+            Color color;
+            if (isCharging)
+            {
+                color = Color.FromArgb(40, 0, 122, 255); // Blue for charging (low opacity)
+            }
+            else if (percentage <= 20)
+            {
+                color = Color.FromArgb(40, 255, 59, 48); // Red (low opacity)
+            }
+            else if (percentage <= 50)
+            {
+                color = Color.FromArgb(40, 255, 204, 0); // Yellow (low opacity)
+            }
+            else
+            {
+                color = Color.FromArgb(40, 48, 209, 88); // Green (low opacity)
+            }
+
+            glow.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
         }
 
         /// <summary>
