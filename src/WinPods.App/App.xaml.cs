@@ -27,6 +27,7 @@ namespace WinPods.App
         private MediaController? _mediaController;
         private GlobalHotkeyService? _globalHotkeyService;
         private NoiseControlService? _noiseControlService;
+        private Services.BluetoothConnectionService? _bluetoothConnectionService;
         private readonly SettingsService _settings = SettingsService.Instance;
 
         // File logging
@@ -254,6 +255,10 @@ namespace WinPods.App
                 // Create noise control service (needed for tray menu)
                 _noiseControlService = new NoiseControlService();
 
+                // Create Bluetooth connection service
+                _bluetoothConnectionService = new Services.BluetoothConnectionService();
+                Console.WriteLine("[App] BluetoothConnectionService created");
+
                 // Wire up services to tray icon
                 WireUpTrayIconServices();
 
@@ -440,7 +445,8 @@ namespace WinPods.App
                     Console.WriteLine("[App] Popup closed, _isPopupVisible set to false");
                 };
 
-                _popupWindow.ShowBattery(state);
+                // Pass BluetoothConnectionService to popup
+                _popupWindow.ShowBattery(state, _bluetoothConnectionService);
                 _isPopupVisible = true;
                 Console.WriteLine("[App] Popup shown, _isPopupVisible set to true");
             }
@@ -571,6 +577,9 @@ namespace WinPods.App
 
                 // Dispose noise control service
                 _noiseControlService?.Dispose();
+
+                // Dispose Bluetooth connection service
+                _bluetoothConnectionService?.Dispose();
 
                 // Dispose tray icon
                 _trayIconService?.Dispose();

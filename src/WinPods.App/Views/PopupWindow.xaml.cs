@@ -22,6 +22,7 @@ namespace WinPods.App.Views
         private const int AutoDismissDelaySeconds = 5;
         private Compositor? _compositor;
         private NoiseControlService? _noiseControlService;
+        private Services.BluetoothConnectionService? _bluetoothConnectionService;
         private ulong? _bluetoothAddress;
 
         public PopupWindow()
@@ -36,7 +37,7 @@ namespace WinPods.App.Views
             this.Title = "WinPods";
 
             // Set window size - make taller to ensure all content fits including AirPods icon
-            AppWindow.Resize(new Windows.Graphics.SizeInt32(800, 1200));
+            AppWindow.Resize(new Windows.Graphics.SizeInt32(800, 1300));
 
             // Center the window on screen
             CenterWindow();
@@ -48,11 +49,18 @@ namespace WinPods.App.Views
             // Initialize noise control mode - default to Off
             SetNoiseControlMode(Services.NoiseControlMode.Off);
 
+            // Initialize connection status
+            UpdateConnectionStatusUI(Services.ConnectionStatus.Disconnected);
+
             // Subscribe to closed event for cleanup
             this.Closed += (s, e) =>
             {
                 _autoDismissTimer?.Stop();
                 _autoDismissTimer = null;
+                if (_bluetoothConnectionService != null)
+                {
+                    _bluetoothConnectionService.ConnectionStateChanged -= OnConnectionStateChanged;
+                }
             };
         }
 
@@ -130,19 +138,28 @@ namespace WinPods.App.Views
         /// <summary>
         /// Shows the popup with battery information and slide-up animation.
         /// </summary>
-        public async void ShowBattery(AirPodsState state)
+        public async void ShowBattery(AirPodsState state, Services.BluetoothConnectionService? connectionService)
         {
             // Stop any existing timer
             _autoDismissTimer?.Stop();
 
-            // Update UI with state
-            UpdateBatteryDisplay(state);
+            // Store connection service and bluetooth address
+            _bluetoothConnectionService = connectionService;
 
-            // Store bluetooth address and initialize noise control service
             if (state.BluetoothAddress.HasValue)
             {
                 _bluetoothAddress = state.BluetoothAddress.Value;
                 System.Diagnostics.Debug.WriteLine($"[PopupWindow] Stored Bluetooth address: {_bluetoothAddress.Value:X12}");
+
+                // Subscribe to connection state changes
+                if (_bluetoothConnectionService != null)
+                {
+                    _bluetoothConnectionService.ConnectionStateChanged -= OnConnectionStateChanged; // Remove any existing subscription
+                    _bluetoothConnectionService.ConnectionStateChanged += OnConnectionStateChanged;
+
+                    // Update initial connection status
+                    UpdateConnectionStatusUI(_bluetoothConnectionService.Status);
+                }
 
                 // Initialize noise control service if not already done
                 if (_noiseControlService == null)
@@ -156,6 +173,9 @@ namespace WinPods.App.Views
             {
                 System.Diagnostics.Debug.WriteLine("[PopupWindow] Warning: No Bluetooth address available");
             }
+
+            // Update UI with state
+            UpdateBatteryDisplay(state);
 
             // Show window and bring to front
             this.Activate();
@@ -430,6 +450,101 @@ namespace WinPods.App.Views
             else
             {
                 System.Diagnostics.Debug.WriteLine("[PopupWindow] Noise control service not available");
+            }
+        }
+
+        /// <summary>
+        /// Handles connection state changes from BluetoothConnectionService.
+        /// </summary>
+        private void OnConnectionStateChanged(object? sender, Services.ConnectionStateChangedEventArgs e)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PopupWindow] Connection state changed: {e.Status}, IsConnected: {e.IsConnected}");
+
+            // Update UI on dispatcher thread
+            this.DispatcherQueue.TryEnqueue(() =>
+            {
+                UpdateConnectionStatusUI(e.Status);
+            });
+        }
+
+        /// <summary>
+        /// Updates the connection status UI elements.
+        /// </summary>
+        private void UpdateConnectionStatusUI(Services.ConnectionStatus status)
+        {
+            switch (status)
+            {
+                case Services.ConnectionStatus.Connected:
+                    ConnectionStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 48, 209, 88)); // Green
+                    ConnectionStatusText.Text = "Connected";
+                    ConnectionStatusText.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 48, 209, 88));
+                    ConnectButton.Content = "Disconnect";
+                    break;
+                case Services.ConnectionStatus.Connecting:
+                    ConnectionStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 204, 0)); // Yellow
+                    ConnectionStatusText.Text = "Connecting...";
+                    ConnectionStatusText.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 204, 0));
+                    ConnectButton.Content = "Connecting...";
+                    ConnectButton.IsEnabled = false;
+                    break;
+                case Services.ConnectionStatus.Pairing:
+                    ConnectionStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 204, 0)); // Yellow
+                    ConnectionStatusText.Text = "Pairing...";
+                    ConnectionStatusText.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 204, 0));
+                    ConnectButton.Content = "Pairing...";
+                    ConnectButton.IsEnabled = false;
+                    break;
+                case Services.ConnectionStatus.Disconnected:
+                default:
+                    ConnectionStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 58, 58, 60)); // Gray
+                    ConnectionStatusText.Text = "Disconnected";
+                    ConnectionStatusText.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 142, 142, 147));
+                    ConnectButton.Content = "Connect";
+                    ConnectButton.IsEnabled = true;
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Handles the Connect/Disconnect button click.
+        /// </summary>
+        private async void OnConnectButtonClick(object sender, RoutedEventArgs e)
+        {
+            if (_bluetoothConnectionService == null || _bluetoothAddress == null)
+            {
+                System.Diagnostics.Debug.WriteLine("[PopupWindow] Cannot connect - service or address not available");
+                return;
+            }
+
+            try
+            {
+                if (_bluetoothConnectionService.IsConnected)
+                {
+                    // Disconnect
+                    System.Diagnostics.Debug.WriteLine("[PopupWindow] Disconnecting from AirPods...");
+                    await _bluetoothConnectionService.DisconnectAsync();
+                }
+                else
+                {
+                    // Connect
+                    System.Diagnostics.Debug.WriteLine($"[PopupWindow] Connecting to AirPods at address {_bluetoothAddress.Value:X12}...");
+                    var result = await _bluetoothConnectionService.ConnectAsync(_bluetoothAddress.Value);
+
+                    if (result.IsSuccess)
+                    {
+                        System.Diagnostics.Debug.WriteLine("[PopupWindow] ✓ Successfully connected to AirPods");
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[PopupWindow] ❌ Failed to connect: {result.ErrorMessage}");
+                        // Show error notification
+                        ConnectionStatusText.Text = $"Failed: {result.ErrorMessage}";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[PopupWindow] Exception during connect/disconnect: {ex.Message}");
             }
         }
     }

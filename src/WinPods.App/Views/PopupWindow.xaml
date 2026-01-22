@@ -104,6 +104,31 @@
                     </StackPanel>
                 </StackPanel>
 
+                <!-- Connection Status & Connect Button -->
+                <StackPanel Margin="0,10,0,0" Spacing="12">
+                    <!-- Connection Status Indicator -->
+                    <Grid HorizontalAlignment="Center">
+                        <Ellipse x:Name="ConnectionStatusDot" Width="8" Height="8" Fill="#3A3A3C" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="ConnectionStatusText" Text="Disconnected" FontSize="13" Foreground="#8E8E93" FontWeight="Medium" HorizontalAlignment="Center" Margin="16,0,0,0"/>
+                    </Grid>
+
+                    <!-- Connect/Disconnect Button -->
+                    <Button x:Name="ConnectButton"
+                            Content="Connect"
+                            Width="250"
+                            Height="44"
+                            FontSize="15"
+                            FontWeight="SemiBold"
+                            CornerRadius="22"
+                            Click="OnConnectButtonClick"
+                            HorizontalAlignment="Center">
+                        <Button.Resources>
+                            <SolidColorBrush x:Key="ButtonBackground" Color="#007AFF"/>
+                            <SolidColorBrush x:Key="ButtonForeground" Color="White"/>
+                        </Button.Resources>
+                    </Button>
+                </StackPanel>
+
                 <!-- Noise Control Buttons -->
                 <StackPanel Margin="0,10,0,0" Spacing="12">
                     <TextBlock Text="Noise Control"
