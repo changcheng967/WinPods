@@ -1,0 +1,11 @@
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\bin\Debug\net8.0-windows10.0.26100.0\WinPods.Core.deps.json
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\bin\Debug\net8.0-windows10.0.26100.0\WinPods.Core.dll
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\bin\Debug\net8.0-windows10.0.26100.0\WinPods.Core.pdb
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0-windows10.0.26100.0\WinPods.Core.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0-windows10.0.26100.0\WinPods.Core.AssemblyInfoInputs.cache
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0-windows10.0.26100.0\WinPods.Core.AssemblyInfo.cs
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0-windows10.0.26100.0\WinPods.Core.csproj.CoreCompileInputs.cache
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0-windows10.0.26100.0\WinPods.Core.dll
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0-windows10.0.26100.0\refint\WinPods.Core.dll
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0-windows10.0.26100.0\WinPods.Core.pdb
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0-windows10.0.26100.0\ref\WinPods.Core.dll

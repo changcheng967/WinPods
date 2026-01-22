@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "WinPods.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "WinPods.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

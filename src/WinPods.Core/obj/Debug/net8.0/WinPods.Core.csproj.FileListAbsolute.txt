@@ -1,0 +1,2 @@
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0\WinPods.Core.csproj.AssemblyReference.cache
+C:\Users\chang\Downloads\airpod\src\WinPods.Core\obj\Debug\net8.0\WinPods.Core.GeneratedMSBuildEditorConfig.editorconfig

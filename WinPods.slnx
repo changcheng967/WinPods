@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WinPods.App/WinPods.App.csproj">
+      <Platform Project="x86" />
+    </Project>
+    <Project Path="src/WinPods.Core/WinPods.Core.csproj" />
+    <Project Path="src/WinPods.Tests/WinPods.Tests.csproj" />
+  </Folder>
+</Solution>
