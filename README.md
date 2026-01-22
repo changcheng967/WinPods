@@ -27,7 +27,7 @@ The following features are **NOT possible** on Windows without kernel-level driv
 
 **Alternatives:**
 - Use your iPhone to change noise control modes
-- Consider [MagicPods](https://github.com/spike01/MagicPods-Windows) (requires installing a kernel driver)
+- Consider [MagicPods](https://magicpods.app/)) (requires installing a kernel driver)
 - Use the physical button on your AirPods Pro to cycle through modes
 
 ## 🚀 Installation
