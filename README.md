@@ -6,7 +6,7 @@
 
 ## ✨ Features
 
-### ✅ Working in v1.0
+### ✅ Working in v1.1.0
 
 - **🎧 Battery Monitoring** - Real-time battery levels for left/right AirPods and case in system tray tooltip
 - **📦 iOS 26 Liquid Glass Popup** - Beautiful translucent popup with blur effect appears when you open your AirPods case
