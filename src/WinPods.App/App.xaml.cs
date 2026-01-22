@@ -27,8 +27,12 @@ namespace WinPods.App
         private MediaController? _mediaController;
         private GlobalHotkeyService? _globalHotkeyService;
         private NoiseControlService? _noiseControlService;
-        private Services.BluetoothConnectionService? _bluetoothConnectionService;
+        private Services.ConnectionTriggerService? _connectionTriggerService;
+        private Services.AudioConnectionMonitor? _audioConnectionMonitor;
         private readonly SettingsService _settings = SettingsService.Instance;
+
+        // Lid counter tracking for auto-connect
+        private byte? _lastLidCount;
 
         // File logging
         private StreamWriter? _logWriter;
@@ -255,9 +259,10 @@ namespace WinPods.App
                 // Create noise control service (needed for tray menu)
                 _noiseControlService = new NoiseControlService();
 
-                // Create Bluetooth connection service
-                _bluetoothConnectionService = new Services.BluetoothConnectionService();
-                Console.WriteLine("[App] BluetoothConnectionService created");
+                // Create auto-connect services
+                _connectionTriggerService = new Services.ConnectionTriggerService();
+                _audioConnectionMonitor = new Services.AudioConnectionMonitor();
+                Console.WriteLine("[App] Auto-connect services created");
 
                 // Wire up services to tray icon
                 WireUpTrayIconServices();
@@ -306,11 +311,11 @@ namespace WinPods.App
         }
 
         /// <summary>
-        /// Handles AirPods state changes.
+        /// Handles AirPods state changes with three-tier auto-connect system.
         /// </summary>
         private async void OnAirPodsStateChanged(object? sender, AirPodsState state)
         {
-            Log($"[App] OnAirPodsStateChanged called - IsConnected: {state.IsConnected}, IsLowBattery: {state.Battery.IsLowBattery}");
+            Log($"[App] OnAirPodsStateChanged called - IsConnected: {state.IsConnected}, LidOpenCount: {state.LidOpenCount}");
 
             // Update tray icon with new state
             _trayIconService?.UpdateBattery(state);
@@ -342,9 +347,75 @@ namespace WinPods.App
 
             _lastState = state;
 
-            // Show popup if this is a new device or significant change, but NOT if already visible
-            if (state.IsConnected && !_isPopupVisible)
+            // THREE-TIER AUTO-CONNECT SYSTEM
+            // Check if this is a new lid-open event (case just opened)
+            if (state.LidOpenCount != _lastLidCount && state.BluetoothAddress.HasValue)
             {
+                _lastLidCount = state.LidOpenCount;
+                Log($"[App] ========== CASE OPEN DETECTED (Lid Count: {state.LidOpenCount}) ==========");
+
+                // Show popup immediately with "Connecting..." status
+                if (!_isPopupVisible)
+                {
+                    _window.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        ShowAirPodsPopup(state);
+                        // Set popup to Connecting state
+                        _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connecting);
+                    });
+                }
+
+                // TIER 1: Try to trigger Windows Bluetooth connection
+                if (_connectionTriggerService != null)
+                {
+                    Log("[App] Tier 1: Triggering Windows Bluetooth connection...");
+                    bool triggered = await _connectionTriggerService.TryTriggerConnectionAsync(state.BluetoothAddress.Value);
+                    Log($"[App] Tier 1 complete: {triggered}");
+                }
+
+                // TIER 2: Wait for audio connection with timeout
+                if (_audioConnectionMonitor != null)
+                {
+                    Log("[App] Tier 2: Waiting for audio connection (8s timeout)...");
+                    bool connected = await _audioConnectionMonitor.WaitForAudioConnectionAsync(timeoutSeconds: 8);
+
+                    if (connected)
+                    {
+                        // SUCCESS! Auto-connected
+                        Log("[App] ✓✓✓ SUCCESS - AirPods auto-connected!");
+                        _window.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connected);
+
+                            // Auto-dismiss after 2 seconds
+                            _ = Task.Run(async () =>
+                            {
+                                await Task.Delay(2000);
+                                _window.DispatcherQueue.TryEnqueue(() =>
+                                {
+                                    try
+                                    {
+                                        _popupWindow?.Close();
+                                    }
+                                    catch { }
+                                });
+                            });
+                        });
+                    }
+                    else
+                    {
+                        // TIER 3: Timeout - show manual connect button
+                        Log("[App] Tier 2 timeout - Showing manual connect option");
+                        _window.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Disconnected);
+                        });
+                    }
+                }
+            }
+            else if (state.IsConnected && !_isPopupVisible)
+            {
+                // Not a new lid-open, just show popup with current status
                 _window.DispatcherQueue.TryEnqueue(() =>
                 {
                     ShowAirPodsPopup(state);
@@ -445,8 +516,8 @@ namespace WinPods.App
                     Console.WriteLine("[App] Popup closed, _isPopupVisible set to false");
                 };
 
-                // Pass BluetoothConnectionService to popup
-                _popupWindow.ShowBattery(state, _bluetoothConnectionService);
+                // Show battery popup
+                _popupWindow.ShowBattery(state, _audioConnectionMonitor);
                 _isPopupVisible = true;
                 Console.WriteLine("[App] Popup shown, _isPopupVisible set to true");
             }
@@ -577,9 +648,6 @@ namespace WinPods.App
 
                 // Dispose noise control service
                 _noiseControlService?.Dispose();
-
-                // Dispose Bluetooth connection service
-                _bluetoothConnectionService?.Dispose();
 
                 // Dispose tray icon
                 _trayIconService?.Dispose();
