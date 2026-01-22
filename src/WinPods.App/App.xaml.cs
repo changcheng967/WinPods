@@ -34,6 +34,9 @@ namespace WinPods.App
         // Lid counter tracking for auto-connect
         private byte? _lastLidCount;
 
+        // Synchronization for state changes (prevents race conditions in auto-connect)
+        private int _stateChangeInProgress = 0;
+
         // File logging
         private StreamWriter? _logWriter;
         private readonly string _logFilePath = Path.Combine(
@@ -315,110 +318,50 @@ namespace WinPods.App
         /// </summary>
         private async void OnAirPodsStateChanged(object? sender, AirPodsState state)
         {
-            Log($"[App] OnAirPodsStateChanged called - IsConnected: {state.IsConnected}, LidOpenCount: {state.LidOpenCount}");
-
-            // Update tray icon with new state
-            _trayIconService?.UpdateBattery(state);
-
-            // Update Bluetooth address in tray icon for noise control
-            if (state.BluetoothAddress.HasValue)
+            // Prevent reentrancy - if a state change is already being processed, skip this one
+            if (System.Threading.Interlocked.CompareExchange(ref _stateChangeInProgress, 1, 0) != 0)
             {
-                _trayIconService?.SetBluetoothAddress(state.BluetoothAddress.Value);
+                Log($"[App] ⚠️ State change already in progress, skipping this event");
+                return;
             }
 
-            _lastState = state;
-
-            // THREE-TIER AUTO-CONNECT SYSTEM
-            // Check if this is a new lid-open event (case just opened)
-            // MUST HAPPEN FIRST - before any blocking await calls!
-            if (state.LidOpenCount != _lastLidCount && state.BluetoothAddress.HasValue)
+            try
             {
-                _lastLidCount = state.LidOpenCount;
-                Log($"[App] ========== CASE OPEN DETECTED (Lid Count: {state.LidOpenCount}) ==========");
+                Log($"[App] OnAirPodsStateChanged called - IsConnected: {state.IsConnected}, LidOpenCount: {state.LidOpenCount}");
 
-                // FIRST: Check if AirPods are already connected (instant check, no async)
-                bool alreadyConnected = _audioConnectionMonitor?.IsAirPodsDefaultAudioDevice() ?? false;
-                Log($"[App] Initial audio check: AirPods connected = {alreadyConnected}");
+                // Update tray icon with new state
+                _trayIconService?.UpdateBattery(state);
 
-                if (alreadyConnected)
+                // Update Bluetooth address in tray icon for noise control
+                if (state.BluetoothAddress.HasValue)
                 {
-                    // Already connected! Show popup with "Connected" status immediately, skip Tiers 1 & 2
-                    Log("[App] AirPods already connected - showing Connected popup immediately");
-                    if (!_isPopupVisible)
-                    {
-                        _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
-                        {
-                            ShowAirPodsPopup(state);
-                            _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connected);
-
-                            // Auto-dismiss after 2 seconds
-                            _ = Task.Run(async () =>
-                            {
-                                await Task.Delay(2000);
-                                _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
-                                {
-                                    try
-                                    {
-                                        _popupWindow?.Close();
-                                    }
-                                    catch { }
-                                });
-                            });
-                        });
-                    }
+                    _trayIconService?.SetBluetoothAddress(state.BluetoothAddress.Value);
                 }
-                else
+
+                _lastState = state;
+
+                // THREE-TIER AUTO-CONNECT SYSTEM
+                // Check if this is a new lid-open event (case just opened)
+                // MUST HAPPEN FIRST - before any blocking await calls!
+                if (state.LidOpenCount != _lastLidCount && state.BluetoothAddress.HasValue)
                 {
-                    // Not connected - run three-tier system
-                    Log("[App] AirPods not connected - running three-tier system");
+                    _lastLidCount = state.LidOpenCount;
+                    Log($"[App] ========== CASE OPEN DETECTED (Lid Count: {state.LidOpenCount}) ==========");
 
-                    // Show popup immediately with "Connecting..." status
-                    if (!_isPopupVisible)
+                    // FIRST: Check if AirPods are already connected (instant check, no async)
+                    bool alreadyConnected = _audioConnectionMonitor?.IsAirPodsDefaultAudioDevice() ?? false;
+                    Log($"[App] Initial audio check: AirPods connected = {alreadyConnected}");
+
+                    if (alreadyConnected)
                     {
-                        _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
+                        // Already connected! Show popup with "Connected" status immediately, skip Tiers 1 & 2
+                        Log("[App] AirPods already connected - showing Connected popup immediately");
+                        if (!_isPopupVisible)
                         {
-                            ShowAirPodsPopup(state);
-                            // Set popup to Connecting state
-                            _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connecting);
-                        });
-                    }
-
-                    // TIER 1: Try to trigger Windows Bluetooth connection
-                    if (_connectionTriggerService != null)
-                    {
-                        try
-                        {
-                            Log("[App] Tier 1: Triggering Windows Bluetooth connection...");
-                            bool triggered = await _connectionTriggerService.TryTriggerConnectionAsync(state.BluetoothAddress.Value);
-                            Log($"[App] Tier 1 complete: {triggered}");
-                        }
-                        catch (Exception ex)
-                        {
-                            Log($"[App] Tier 1 exception: {ex.Message}");
-                            Log($"[App] Tier 1 stack trace: {ex.StackTrace}");
-                        }
-                    }
-
-                    // TIER 2: Wait for audio connection with timeout
-                    if (_audioConnectionMonitor != null)
-                    {
-                        Log("[App] Tier 2: Waiting for audio connection (8s timeout)...");
-                        bool connected = await _audioConnectionMonitor.WaitForAudioConnectionAsync(timeoutSeconds: 8);
-
-                        if (connected)
-                        {
-                            // SUCCESS! Auto-connected
-                            Log("[App] ✓✓✓ SUCCESS - AirPods auto-connected!");
                             _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
                             {
+                                ShowAirPodsPopup(state);
                                 _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connected);
-
-                                // Show toast notification
-                                if (_lastState != null)
-                                {
-                                    string batteryInfo = $"L: {_lastState.Battery.Left.Percentage}% R: {_lastState.Battery.Right.Percentage}% C: {_lastState.Battery.Case.Percentage}%";
-                                    _ = _trayIconService?.ShowNotificationAsync("AirPods Connected", batteryInfo);
-                                }
 
                                 // Auto-dismiss after 2 seconds
                                 _ = Task.Run(async () =>
@@ -435,38 +378,113 @@ namespace WinPods.App
                                 });
                             });
                         }
-                        else
+                    }
+                    else
+                    {
+                        // Not connected - run three-tier system
+                        Log("[App] AirPods not connected - running three-tier system");
+
+                        // Show popup immediately with "Connecting..." status
+                        if (!_isPopupVisible)
                         {
-                            // TIER 3: Timeout - show manual connect button
-                            Log("[App] Tier 2 timeout - Showing manual connect option");
                             _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
                             {
-                                _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Disconnected);
+                                ShowAirPodsPopup(state);
+                                // Set popup to Connecting state
+                                _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connecting);
                             });
+                        }
+
+                        // TIER 1: Try to trigger Windows Bluetooth connection
+                        if (_connectionTriggerService != null)
+                        {
+                            try
+                            {
+                                Log("[App] Tier 1: Triggering Windows Bluetooth connection...");
+                                bool triggered = await _connectionTriggerService.TryTriggerConnectionAsync(state.BluetoothAddress.Value);
+                                Log($"[App] Tier 1 complete: {triggered}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"[App] Tier 1 exception: {ex.Message}");
+                                Log($"[App] Tier 1 stack trace: {ex.StackTrace}");
+                            }
+                        }
+
+                        // TIER 2: Wait for audio connection with timeout
+                        if (_audioConnectionMonitor != null)
+                        {
+                            Log("[App] Tier 2: Waiting for audio connection (8s timeout)...");
+                            bool connected = await _audioConnectionMonitor.WaitForAudioConnectionAsync(timeoutSeconds: 8);
+
+                            if (connected)
+                            {
+                                // SUCCESS! Auto-connected
+                                Log("[App] ✓✓✓ SUCCESS - AirPods auto-connected!");
+                                _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
+                                {
+                                    _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connected);
+
+                                    // Show toast notification
+                                    if (_lastState != null)
+                                    {
+                                        string batteryInfo = $"L: {_lastState.Battery.Left.Percentage}% R: {_lastState.Battery.Right.Percentage}% C: {_lastState.Battery.Case.Percentage}%";
+                                        _ = _trayIconService?.ShowNotificationAsync("AirPods Connected", batteryInfo);
+                                    }
+
+                                    // Auto-dismiss after 2 seconds
+                                    _ = Task.Run(async () =>
+                                    {
+                                        await Task.Delay(2000);
+                                        _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
+                                        {
+                                            try
+                                            {
+                                                _popupWindow?.Close();
+                                            }
+                                            catch { }
+                                        });
+                                    });
+                                });
+                            }
+                            else
+                            {
+                                // TIER 3: Timeout - show manual connect button
+                                Log("[App] Tier 2 timeout - Showing manual connect option");
+                                _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
+                                {
+                                    _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Disconnected);
+                                });
+                            }
                         }
                     }
                 }
-            }
 
-            // NOW DO NON-CRITICAL BACKGROUND TASKS (after popup is shown)
+                // NOW DO NON-CRITICAL BACKGROUND TASKS (after popup is shown)
 
-            // Connect noise control service if not already connected (runs in background, doesn't block popup)
-            if (state.BluetoothAddress.HasValue && _noiseControlService != null && !_noiseControlService.IsConnected)
-            {
-                Log($"[App] Attempting to connect NoiseControlService to Bluetooth address: {state.BluetoothAddress.Value:X12}");
-                bool connected = await _noiseControlService.ConnectAsync(state.BluetoothAddress.Value);
-                Log($"[App] Noise control service connection result: {connected}");
-                if (!connected)
+                // Connect noise control service if not already connected (runs in background, doesn't block popup)
+                if (state.BluetoothAddress.HasValue && _noiseControlService != null && !_noiseControlService.IsConnected)
                 {
-                    Log($"[App] WARNING: Noise control not available - GATT characteristics not accessible on Windows");
+                    Log($"[App] Attempting to connect NoiseControlService to Bluetooth address: {state.BluetoothAddress.Value:X12}");
+                    bool connected = await _noiseControlService.ConnectAsync(state.BluetoothAddress.Value);
+                    Log($"[App] Noise control service connection result: {connected}");
+                    if (!connected)
+                    {
+                        Log($"[App] WARNING: Noise control not available - GATT characteristics not accessible on Windows");
+                    }
+                }
+
+                // Check for low battery and show notification
+                if (state.IsConnected && state.Battery.IsLowBattery)
+                {
+                    Console.WriteLine("[App] Low battery detected! Calling ShowLowBatteryNotificationAsync...");
+                    await _trayIconService?.ShowLowBatteryNotificationAsync(state);
                 }
             }
-
-            // Check for low battery and show notification
-            if (state.IsConnected && state.Battery.IsLowBattery)
+            finally
             {
-                Console.WriteLine("[App] Low battery detected! Calling ShowLowBatteryNotificationAsync...");
-                await _trayIconService?.ShowLowBatteryNotificationAsync(state);
+                // Reset the in-progress flag to allow next state change
+                System.Threading.Interlocked.Exchange(ref _stateChangeInProgress, 0);
             }
         }
 

@@ -12,24 +12,25 @@
     </Window.SystemBackdrop>
 
     <Grid x:Name="RootGrid">
-        <!-- iOS 26: Transparent background to show acrylic blur -->
+        <!-- iOS 26: Fully transparent background - only the card should be visible -->
         <Grid.Background>
-            <SolidColorBrush Color="Transparent" Opacity="0"/>
+            <SolidColorBrush Color="#00000000"/>
         </Grid.Background>
 
         <!-- iOS 26 Liquid Glass Card -->
         <Border CornerRadius="44" Padding="48,40" Margin="40">
-            <!-- Translucent glass background -->
+            <!-- More translucent glass background (85% -> 70% opacity) -->
             <Border.Background>
-                <SolidColorBrush Color="#1C1C1E" Opacity="0.85"/>
+                <SolidColorBrush Color="#1C1C1E" Opacity="0.70"/>
             </Border.Background>
 
-            <!-- Specular highlight gradient (brighter at top-left for rim lighting) -->
+            <!-- Enhanced glass rim highlight with gradient -->
             <Border.BorderBrush>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#60FFFFFF" Offset="0"/>
-                    <GradientStop Color="#30FFFFFF" Offset="0.5"/>
-                    <GradientStop Color="#10FFFFFF" Offset="1"/>
+                    <GradientStop Color="#70FFFFFF" Offset="0"/>
+                    <GradientStop Color="#50FFFFFF" Offset="0.3"/>
+                    <GradientStop Color="#20FFFFFF" Offset="0.7"/>
+                    <GradientStop Color="#05FFFFFF" Offset="1"/>
                 </LinearGradientBrush>
             </Border.BorderBrush>
             <Border.BorderThickness>1.5</Border.BorderThickness>

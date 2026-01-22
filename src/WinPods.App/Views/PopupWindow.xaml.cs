@@ -284,10 +284,18 @@ namespace WinPods.App.Views
                 });
             }
 
-            // Start auto-dismiss timer
-            _autoDismissTimer?.Start();
+            // Only start auto-dismiss timer if NOT in Connecting state
+            // (Connecting state should wait for connection result before dismissing)
+            if (_connectionState != ConnectionState.Connecting)
+            {
+                _autoDismissTimer?.Start();
+                Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] Auto-dismiss timer started");
+            }
+            else
+            {
+                Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] In Connecting state - NOT starting auto-dismiss timer");
+            }
 
-            Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] Auto-dismiss timer started");
             Console.WriteLine($"[PopupWindow] ========== ShowBattery END [{stopwatch.ElapsedMilliseconds}ms] ==========");
         }
 
@@ -627,7 +635,52 @@ namespace WinPods.App.Views
         {
             this.DispatcherQueue.TryEnqueue(() =>
             {
+                Console.WriteLine($"[PopupWindow] SetConnectionState called: {state}");
+
+                // Update the internal state and UI
+                _connectionState = state;
                 UpdateConnectionStatusUI(state);
+
+                // Handle auto-dismiss based on connection state
+                _autoDismissTimer?.Stop();
+
+                if (state == ConnectionState.Connected)
+                {
+                    Console.WriteLine($"[PopupWindow] Connected - starting 2s auto-dismiss");
+                    // Auto-dismiss after 2 seconds when connected
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(2000);
+                        this.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            try
+                            {
+                                Close();
+                                Console.WriteLine($"[PopupWindow] Auto-dismissed after successful connection");
+                            }
+                            catch { }
+                        });
+                    });
+                }
+                else if (state == ConnectionState.Disconnected)
+                {
+                    Console.WriteLine($"[PopupWindow] Disconnected - starting 5s auto-dismiss");
+                    // Auto-dismiss after 5 seconds when disconnected (manual connect)
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(5000);
+                        this.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            try
+                            {
+                                Close();
+                                Console.WriteLine($"[PopupWindow] Auto-dismissed after disconnect timeout");
+                            }
+                            catch { }
+                        });
+                    });
+                }
+                // else: Connecting state - don't auto-dismiss, wait for connection result
             });
         }
 

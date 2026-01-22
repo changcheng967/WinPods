@@ -19,6 +19,7 @@ namespace WinPods.App.Services
 
             var endTime = DateTime.Now.AddSeconds(timeoutSeconds);
             var checkCount = 0;
+            bool loggedAvailableDevices = false;
 
             while (DateTime.Now < endTime)
             {
@@ -26,6 +27,13 @@ namespace WinPods.App.Services
                 bool isConnected = IsAirPodsDefaultAudioDevice();
 
                 Console.WriteLine($"[AudioMonitor] Check #{checkCount}: AirPods is default audio device = {isConnected}");
+
+                // Log available audio devices on first check to help debug
+                if (!loggedAvailableDevices)
+                {
+                    LogAvailableAudioDevices();
+                    loggedAvailableDevices = true;
+                }
 
                 if (isConnected)
                 {
@@ -39,6 +47,33 @@ namespace WinPods.App.Services
 
             Console.WriteLine("[AudioMonitor] ⏱️ Timeout - AirPods did not connect within the time limit");
             return false;
+        }
+
+        /// <summary>
+        /// Logs all available audio render devices for debugging.
+        /// </summary>
+        private void LogAvailableAudioDevices()
+        {
+            try
+            {
+                var currentDefaultId = MediaDevice.GetDefaultAudioRenderId(AudioDeviceRole.Default);
+                Console.WriteLine($"[AudioMonitor] Current default audio device ID: {currentDefaultId}");
+
+                var devices = DeviceInformation.FindAllAsync(MediaDevice.GetAudioRenderSelector()).AsTask().Result;
+                Console.WriteLine($"[AudioMonitor] Found {devices.Count} audio render devices:");
+
+                foreach (var device in devices)
+                {
+                    string isDefault = device.Id == currentDefaultId ? " [DEFAULT]" : "";
+                    Console.WriteLine($"[AudioMonitor]   - {device.Name}{isDefault}");
+                    Console.WriteLine($"[AudioMonitor]     ID: {device.Id}");
+                    Console.WriteLine($"[AudioMonitor]     IsEnabled: {device.IsEnabled}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AudioMonitor] Error logging audio devices: {ex.Message}");
+            }
         }
 
         /// <summary>
