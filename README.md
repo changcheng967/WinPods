@@ -1,6 +1,6 @@
 # WinPods - AirPods Experience for Windows
 
-> **Version 1.0.0** - Bring the native AirPods experience to Windows with beautiful UI and seamless functionality.
+> **Version 1.1.0** - Bring the native AirPods experience to Windows with iOS 26 Liquid Glass UI and seamless functionality.
 
 ![Screenshot](docs/screenshot.png)
 
@@ -9,7 +9,8 @@
 ### ✅ Working in v1.0
 
 - **🎧 Battery Monitoring** - Real-time battery levels for left/right AirPods and case in system tray tooltip
-- **📦 iOS-Style Popup** - Beautiful popup appears when you open your AirPods case near your PC
+- **📦 iOS 26 Liquid Glass Popup** - Beautiful translucent popup with blur effect appears when you open your AirPods case
+- **🔄 Auto-Connect** - Automatically connects AirPods audio when you open the case near your PC
 - **🎵 Media Controls** - Play/Pause your media from the system tray menu (Ctrl+Alt+P hotkey)
 - **🔔 Low Battery Alerts** - Toast notifications when AirPods battery drops below 20%
 - **⚙️ Settings UI** - Modern WinUI 3 settings window for customization

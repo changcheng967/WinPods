@@ -159,3 +159,7 @@ Package.StoreAssociation.xml
 # Internal development files
 CLAUDE.md
 continue.txt
+
+# Release packages (don't commit build artifacts)
+release/
+*.zip
