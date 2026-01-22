@@ -155,9 +155,9 @@ WinPods:
 
 ## 🔗 Links
 
-- [GitHub Repository](https://github.com/yourusername/WinPods)
-- [Issue Tracker](https://github.com/yourusername/WinPods/issues)
-- [Releases](https://github.com/yourusername/WinPods/releases)
+- [GitHub Repository](https://github.com/changcheng967/WinPods)
+- [Issue Tracker](https://github.com/changcheng967/WinPods/issues)
+- [Releases](https://github.com/changcheng967/WinPods/releases)
 
 ---
 
