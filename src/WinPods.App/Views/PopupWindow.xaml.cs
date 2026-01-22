@@ -30,8 +30,14 @@ namespace WinPods.App.Views
 
         public PopupWindow()
         {
+            var constructorStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            Console.WriteLine($"[PopupWindow] ========== CONSTRUCTOR START ==========");
+
             this.InitializeComponent();
+            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] InitializeComponent completed");
+
             InitializeAutoDismissTimer();
+            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] Timer initialized");
 
             // Get compositor for animations
             _compositor = this.Compositor;
@@ -41,13 +47,24 @@ namespace WinPods.App.Views
 
             // Set window size
             AppWindow.Resize(new Windows.Graphics.SizeInt32(800, 1200));
+            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] Window resized");
 
             // Center the window on screen
             CenterWindow();
+            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] Window centered");
+
+            // Subscribe to window activation events
+            this.Activated += (s, e) =>
+            {
+                Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] *** WINDOW ACTIVATED EVENT FIRED ***");
+            };
 
             // Bring window to front and keep it on top
+            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] About to call Activate()...");
             this.Activate();
+            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] Activate() returned");
             EnsureTopMost();
+            Console.WriteLine($"[PopupWindow] [{constructorStopwatch.ElapsedMilliseconds}ms] EnsureTopMost() completed");
 
             // Initialize noise control mode - default to Off
             SetNoiseControlMode(Services.NoiseControlMode.Off);
@@ -61,6 +78,8 @@ namespace WinPods.App.Views
                 _autoDismissTimer?.Stop();
                 _autoDismissTimer = null;
             };
+
+            Console.WriteLine($"[PopupWindow] ========== CONSTRUCTOR END [{constructorStopwatch.ElapsedMilliseconds}ms] ==========");
         }
 
         /// <summary>
@@ -149,8 +168,22 @@ namespace WinPods.App.Views
         /// </summary>
         public async void ShowBattery(AirPodsState state, Services.AudioConnectionMonitor? audioMonitor)
         {
-            Console.WriteLine($"[PopupWindow] ShowBattery called - Model: {state.ModelName}, IsConnected: {state.IsConnected}");
-            Console.WriteLine($"[PopupWindow] Battery - Left: {state.Battery.Left.Percentage}%, Right: {state.Battery.Right.Percentage}%, Case: {state.Battery.Case.Percentage}%");
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            Console.WriteLine($"[PopupWindow] ========== ShowBattery START ==========");
+            Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] ShowBattery called - Model: {state.ModelName}, IsConnected: {state.IsConnected}");
+            Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] Battery - Left: {state.Battery.Left.Percentage}%, Right: {state.Battery.Right.Percentage}%, Case: {state.Battery.Case.Percentage}%");
+
+            // Show window IMMEDIATELY - before any async operations
+            Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] *** ABOUT TO ACTIVATE WINDOW ***");
+            this.Activate();
+            Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] Activate() called");
+            EnsureTopMost();
+            Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] EnsureTopMost() completed");
+
+            // Animate in with slide-up effect
+            Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] About to start animation...");
+            AnimateIn();
+            Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] AnimateIn() returned");
 
             // Stop any existing timer
             _autoDismissTimer?.Stop();
@@ -161,42 +194,46 @@ namespace WinPods.App.Views
             if (state.BluetoothAddress.HasValue)
             {
                 _bluetoothAddress = state.BluetoothAddress.Value;
-                System.Diagnostics.Debug.WriteLine($"[PopupWindow] Stored Bluetooth address: {_bluetoothAddress.Value:X12}");
+                Console.WriteLine($"[PopupWindow] Stored Bluetooth address: {_bluetoothAddress.Value:X12}");
 
-                // Check current audio connection status
+                // Check current audio connection status (sync, fast)
                 if (_audioMonitor != null)
                 {
                     bool isConnected = _audioMonitor.IsAirPodsDefaultAudioDevice();
                     UpdateConnectionStatusUI(isConnected ? ConnectionState.Connected : ConnectionState.Disconnected);
                 }
-
-                // Initialize noise control service if not already done
-                if (_noiseControlService == null)
-                {
-                    _noiseControlService = new NoiseControlService();
-                    bool connected = await _noiseControlService.ConnectAsync(_bluetoothAddress.Value);
-                    System.Diagnostics.Debug.WriteLine($"[PopupWindow] Noise control service connection: {connected}");
-                }
             }
             else
             {
-                System.Diagnostics.Debug.WriteLine("[PopupWindow] Warning: No Bluetooth address available");
+                Console.WriteLine("[PopupWindow] Warning: No Bluetooth address available");
             }
 
             // Update UI with state
             UpdateBatteryDisplay(state);
 
-            // Show window and bring to front
-            this.Activate();
-            EnsureTopMost();
-
-            // Animate in with slide-up effect
-            AnimateIn();
+            // Initialize noise control service ASYNCHRONOUSLY in background (don't block popup display)
+            if (_noiseControlService == null && _bluetoothAddress.HasValue)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        _noiseControlService = new NoiseControlService();
+                        bool connected = await _noiseControlService.ConnectAsync(_bluetoothAddress.Value);
+                        Console.WriteLine($"[PopupWindow] Noise control service connection: {connected}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[PopupWindow] Noise control service error: {ex.Message}");
+                    }
+                });
+            }
 
             // Start auto-dismiss timer
             _autoDismissTimer?.Start();
 
-            System.Diagnostics.Debug.WriteLine("[PopupWindow] Showing battery popup with animation (will auto-close in 5 seconds)");
+            Console.WriteLine($"[PopupWindow] [{stopwatch.ElapsedMilliseconds}ms] Auto-dismiss timer started");
+            Console.WriteLine($"[PopupWindow] ========== ShowBattery END [{stopwatch.ElapsedMilliseconds}ms] ==========");
         }
 
         /// <summary>

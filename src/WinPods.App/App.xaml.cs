@@ -324,31 +324,13 @@ namespace WinPods.App
             if (state.BluetoothAddress.HasValue)
             {
                 _trayIconService?.SetBluetoothAddress(state.BluetoothAddress.Value);
-
-                // Connect noise control service if not already connected
-                if (_noiseControlService != null && !_noiseControlService.IsConnected)
-                {
-                    Log($"[App] Attempting to connect NoiseControlService to Bluetooth address: {state.BluetoothAddress.Value:X12}");
-                    bool connected = await _noiseControlService.ConnectAsync(state.BluetoothAddress.Value);
-                    Log($"[App] Noise control service connection result: {connected}");
-                    if (!connected)
-                    {
-                        Log($"[App] WARNING: Noise control not available - GATT characteristics not accessible on Windows");
-                    }
-                }
-            }
-
-            // Check for low battery and show notification
-            if (state.IsConnected && state.Battery.IsLowBattery)
-            {
-                Console.WriteLine("[App] Low battery detected! Calling ShowLowBatteryNotificationAsync...");
-                await _trayIconService?.ShowLowBatteryNotificationAsync(state);
             }
 
             _lastState = state;
 
             // THREE-TIER AUTO-CONNECT SYSTEM
             // Check if this is a new lid-open event (case just opened)
+            // MUST HAPPEN FIRST - before any blocking await calls!
             if (state.LidOpenCount != _lastLidCount && state.BluetoothAddress.HasValue)
             {
                 _lastLidCount = state.LidOpenCount;
@@ -364,7 +346,7 @@ namespace WinPods.App
                     Log("[App] AirPods already connected - showing Connected popup immediately");
                     if (!_isPopupVisible)
                     {
-                        _window.DispatcherQueue.TryEnqueue(() =>
+                        _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
                         {
                             ShowAirPodsPopup(state);
                             _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connected);
@@ -373,7 +355,7 @@ namespace WinPods.App
                             _ = Task.Run(async () =>
                             {
                                 await Task.Delay(2000);
-                                _window.DispatcherQueue.TryEnqueue(() =>
+                                _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
                                 {
                                     try
                                     {
@@ -393,7 +375,7 @@ namespace WinPods.App
                     // Show popup immediately with "Connecting..." status
                     if (!_isPopupVisible)
                     {
-                        _window.DispatcherQueue.TryEnqueue(() =>
+                        _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
                         {
                             ShowAirPodsPopup(state);
                             // Set popup to Connecting state
@@ -427,7 +409,7 @@ namespace WinPods.App
                         {
                             // SUCCESS! Auto-connected
                             Log("[App] ✓✓✓ SUCCESS - AirPods auto-connected!");
-                            _window.DispatcherQueue.TryEnqueue(() =>
+                            _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
                             {
                                 _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connected);
 
@@ -442,7 +424,7 @@ namespace WinPods.App
                                 _ = Task.Run(async () =>
                                 {
                                     await Task.Delay(2000);
-                                    _window.DispatcherQueue.TryEnqueue(() =>
+                                    _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
                                     {
                                         try
                                         {
@@ -457,13 +439,34 @@ namespace WinPods.App
                         {
                             // TIER 3: Timeout - show manual connect button
                             Log("[App] Tier 2 timeout - Showing manual connect option");
-                            _window.DispatcherQueue.TryEnqueue(() =>
+                            _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
                             {
                                 _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Disconnected);
                             });
                         }
                     }
                 }
+            }
+
+            // NOW DO NON-CRITICAL BACKGROUND TASKS (after popup is shown)
+
+            // Connect noise control service if not already connected (runs in background, doesn't block popup)
+            if (state.BluetoothAddress.HasValue && _noiseControlService != null && !_noiseControlService.IsConnected)
+            {
+                Log($"[App] Attempting to connect NoiseControlService to Bluetooth address: {state.BluetoothAddress.Value:X12}");
+                bool connected = await _noiseControlService.ConnectAsync(state.BluetoothAddress.Value);
+                Log($"[App] Noise control service connection result: {connected}");
+                if (!connected)
+                {
+                    Log($"[App] WARNING: Noise control not available - GATT characteristics not accessible on Windows");
+                }
+            }
+
+            // Check for low battery and show notification
+            if (state.IsConnected && state.Battery.IsLowBattery)
+            {
+                Console.WriteLine("[App] Low battery detected! Calling ShowLowBatteryNotificationAsync...");
+                await _trayIconService?.ShowLowBatteryNotificationAsync(state);
             }
         }
 
@@ -473,7 +476,7 @@ namespace WinPods.App
         private void OnAirPodsLidOpened(object? sender, EventArgs e)
         {
             // Show popup when case lid is opened, but NOT if already visible
-            _window.DispatcherQueue.TryEnqueue(() =>
+            _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
             {
                 if (_lastState != null && _lastState.IsConnected && !_isPopupVisible)
                 {
@@ -515,7 +518,7 @@ namespace WinPods.App
         /// </summary>
         private void ShowNoiseControlPopup()
         {
-            _window.DispatcherQueue.TryEnqueue(() =>
+            _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
             {
                 if (_lastState != null && _lastState.IsConnected)
                 {
@@ -577,7 +580,7 @@ namespace WinPods.App
         /// </summary>
         private void OnTrayIconClicked(object? sender, EventArgs e)
         {
-            _window.DispatcherQueue.TryEnqueue(() =>
+            _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
             {
                 if (_lastState != null && _lastState.IsConnected)
                 {
@@ -603,7 +606,7 @@ namespace WinPods.App
                 // Create settings window on the UI thread
                 if (_window?.DispatcherQueue != null)
                 {
-                    _window.DispatcherQueue.TryEnqueue(() =>
+                    _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, () =>
                     {
                         try
                         {
