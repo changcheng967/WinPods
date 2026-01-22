@@ -354,53 +354,20 @@ namespace WinPods.App
                 _lastLidCount = state.LidOpenCount;
                 Log($"[App] ========== CASE OPEN DETECTED (Lid Count: {state.LidOpenCount}) ==========");
 
-                // Show popup immediately with "Connecting..." status
-                if (!_isPopupVisible)
-                {
-                    _window.DispatcherQueue.TryEnqueue(() =>
-                    {
-                        ShowAirPodsPopup(state);
-                        // Set popup to Connecting state
-                        _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connecting);
-                    });
-                }
+                // FIRST: Check if AirPods are already connected (instant check, no async)
+                bool alreadyConnected = _audioConnectionMonitor?.IsAirPodsDefaultAudioDevice() ?? false;
+                Log($"[App] Initial audio check: AirPods connected = {alreadyConnected}");
 
-                // TIER 1: Try to trigger Windows Bluetooth connection
-                if (_connectionTriggerService != null)
+                if (alreadyConnected)
                 {
-                    try
+                    // Already connected! Show popup with "Connected" status immediately, skip Tiers 1 & 2
+                    Log("[App] AirPods already connected - showing Connected popup immediately");
+                    if (!_isPopupVisible)
                     {
-                        Log("[App] Tier 1: Triggering Windows Bluetooth connection...");
-                        bool triggered = await _connectionTriggerService.TryTriggerConnectionAsync(state.BluetoothAddress.Value);
-                        Log($"[App] Tier 1 complete: {triggered}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"[App] Tier 1 exception: {ex.Message}");
-                        Log($"[App] Tier 1 stack trace: {ex.StackTrace}");
-                    }
-                }
-
-                // TIER 2: Wait for audio connection with timeout
-                if (_audioConnectionMonitor != null)
-                {
-                    Log("[App] Tier 2: Waiting for audio connection (8s timeout)...");
-                    bool connected = await _audioConnectionMonitor.WaitForAudioConnectionAsync(timeoutSeconds: 8);
-
-                    if (connected)
-                    {
-                        // SUCCESS! Auto-connected
-                        Log("[App] ✓✓✓ SUCCESS - AirPods auto-connected!");
                         _window.DispatcherQueue.TryEnqueue(() =>
                         {
+                            ShowAirPodsPopup(state);
                             _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connected);
-
-                            // Show toast notification
-                            if (_lastState != null)
-                            {
-                                string batteryInfo = $"L: {_lastState.Battery.Left.Percentage}% R: {_lastState.Battery.Right.Percentage}% C: {_lastState.Battery.Case.Percentage}%";
-                                _ = _trayIconService?.ShowNotificationAsync("AirPods Connected", batteryInfo);
-                            }
 
                             // Auto-dismiss after 2 seconds
                             _ = Task.Run(async () =>
@@ -417,24 +384,86 @@ namespace WinPods.App
                             });
                         });
                     }
-                    else
+                }
+                else
+                {
+                    // Not connected - run three-tier system
+                    Log("[App] AirPods not connected - running three-tier system");
+
+                    // Show popup immediately with "Connecting..." status
+                    if (!_isPopupVisible)
                     {
-                        // TIER 3: Timeout - show manual connect button
-                        Log("[App] Tier 2 timeout - Showing manual connect option");
                         _window.DispatcherQueue.TryEnqueue(() =>
                         {
-                            _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Disconnected);
+                            ShowAirPodsPopup(state);
+                            // Set popup to Connecting state
+                            _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connecting);
                         });
                     }
+
+                    // TIER 1: Try to trigger Windows Bluetooth connection
+                    if (_connectionTriggerService != null)
+                    {
+                        try
+                        {
+                            Log("[App] Tier 1: Triggering Windows Bluetooth connection...");
+                            bool triggered = await _connectionTriggerService.TryTriggerConnectionAsync(state.BluetoothAddress.Value);
+                            Log($"[App] Tier 1 complete: {triggered}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[App] Tier 1 exception: {ex.Message}");
+                            Log($"[App] Tier 1 stack trace: {ex.StackTrace}");
+                        }
+                    }
+
+                    // TIER 2: Wait for audio connection with timeout
+                    if (_audioConnectionMonitor != null)
+                    {
+                        Log("[App] Tier 2: Waiting for audio connection (8s timeout)...");
+                        bool connected = await _audioConnectionMonitor.WaitForAudioConnectionAsync(timeoutSeconds: 8);
+
+                        if (connected)
+                        {
+                            // SUCCESS! Auto-connected
+                            Log("[App] ✓✓✓ SUCCESS - AirPods auto-connected!");
+                            _window.DispatcherQueue.TryEnqueue(() =>
+                            {
+                                _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connected);
+
+                                // Show toast notification
+                                if (_lastState != null)
+                                {
+                                    string batteryInfo = $"L: {_lastState.Battery.Left.Percentage}% R: {_lastState.Battery.Right.Percentage}% C: {_lastState.Battery.Case.Percentage}%";
+                                    _ = _trayIconService?.ShowNotificationAsync("AirPods Connected", batteryInfo);
+                                }
+
+                                // Auto-dismiss after 2 seconds
+                                _ = Task.Run(async () =>
+                                {
+                                    await Task.Delay(2000);
+                                    _window.DispatcherQueue.TryEnqueue(() =>
+                                    {
+                                        try
+                                        {
+                                            _popupWindow?.Close();
+                                        }
+                                        catch { }
+                                    });
+                                });
+                            });
+                        }
+                        else
+                        {
+                            // TIER 3: Timeout - show manual connect button
+                            Log("[App] Tier 2 timeout - Showing manual connect option");
+                            _window.DispatcherQueue.TryEnqueue(() =>
+                            {
+                                _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Disconnected);
+                            });
+                        }
+                    }
                 }
-            }
-            else if (state.IsConnected && !_isPopupVisible)
-            {
-                // Not a new lid-open, just show popup with current status
-                _window.DispatcherQueue.TryEnqueue(() =>
-                {
-                    ShowAirPodsPopup(state);
-                });
             }
         }
 
