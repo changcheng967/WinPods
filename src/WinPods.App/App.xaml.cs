@@ -395,6 +395,13 @@ namespace WinPods.App
                         {
                             _popupWindow?.SetConnectionState(PopupWindow.ConnectionState.Connected);
 
+                            // Show toast notification
+                            if (_lastState != null)
+                            {
+                                string batteryInfo = $"L: {_lastState.Battery.Left.Percentage}% R: {_lastState.Battery.Right.Percentage}% C: {_lastState.Battery.Case.Percentage}%";
+                                _ = _trayIconService?.ShowNotificationAsync("AirPods Connected", batteryInfo);
+                            }
+
                             // Auto-dismiss after 2 seconds
                             _ = Task.Run(async () =>
                             {
