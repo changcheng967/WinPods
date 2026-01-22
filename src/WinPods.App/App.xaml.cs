@@ -368,9 +368,17 @@ namespace WinPods.App
                 // TIER 1: Try to trigger Windows Bluetooth connection
                 if (_connectionTriggerService != null)
                 {
-                    Log("[App] Tier 1: Triggering Windows Bluetooth connection...");
-                    bool triggered = await _connectionTriggerService.TryTriggerConnectionAsync(state.BluetoothAddress.Value);
-                    Log($"[App] Tier 1 complete: {triggered}");
+                    try
+                    {
+                        Log("[App] Tier 1: Triggering Windows Bluetooth connection...");
+                        bool triggered = await _connectionTriggerService.TryTriggerConnectionAsync(state.BluetoothAddress.Value);
+                        Log($"[App] Tier 1 complete: {triggered}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[App] Tier 1 exception: {ex.Message}");
+                        Log($"[App] Tier 1 stack trace: {ex.StackTrace}");
+                    }
                 }
 
                 // TIER 2: Wait for audio connection with timeout

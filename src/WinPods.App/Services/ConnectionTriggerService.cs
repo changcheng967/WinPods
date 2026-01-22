@@ -50,12 +50,23 @@ namespace WinPods.App.Services
 
                 await Task.Delay(100);
 
-                // Attempt 3: Get GATT services (pokes the Bluetooth stack)
-                Console.WriteLine("[ConnectionTrigger] Attempt 3: Getting GATT services...");
+                // Attempt 3: Get GATT services with timeout (pokes the Bluetooth stack)
+                Console.WriteLine("[ConnectionTrigger] Attempt 3: Getting GATT services with 5s timeout...");
                 try
                 {
-                    var gattResult = await device.GetGattServicesAsync(BluetoothCacheMode.Uncached);
-                    Console.WriteLine($"[ConnectionTrigger] GATT services result: {gattResult.Status}, Services: {gattResult.Services?.Count ?? 0}");
+                    var gattTask = device.GetGattServicesAsync(BluetoothCacheMode.Uncached).AsTask();
+                    var timeoutTask = Task.Delay(5000);
+                    var completedTask = await Task.WhenAny(gattTask, timeoutTask);
+
+                    if (completedTask == gattTask)
+                    {
+                        var gattResult = await gattTask;
+                        Console.WriteLine($"[ConnectionTrigger] GATT services result: {gattResult.Status}, Services: {gattResult.Services?.Count ?? 0}");
+                    }
+                    else
+                    {
+                        Console.WriteLine("[ConnectionTrigger] GATT services timeout after 5s (this is OK)");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -65,26 +76,37 @@ namespace WinPods.App.Services
                 await Task.Delay(100);
 
                 // Attempt 4: Find device via selector and access properties
-                Console.WriteLine("[ConnectionTrigger] Attempt 5: Finding via device selector...");
+                Console.WriteLine("[ConnectionTrigger] Attempt 5: Finding via device selector with 3s timeout...");
                 try
                 {
                     var selector = BluetoothDevice.GetDeviceSelectorFromBluetoothAddress(bluetoothAddress);
-                    var devices = await DeviceInformation.FindAllAsync(selector);
-                    Console.WriteLine($"[ConnectionTrigger] Found {devices.Count} devices via selector");
+                    var devicesTask = DeviceInformation.FindAllAsync(selector).AsTask();
+                    var timeoutTask = Task.Delay(3000);
+                    var completedTask = await Task.WhenAny(devicesTask, timeoutTask);
 
-                    foreach (var devInfo in devices)
+                    if (completedTask == devicesTask)
                     {
-                        Console.WriteLine($"[ConnectionTrigger] Checking device: {devInfo.Name}");
+                        var devices = await devicesTask;
+                        Console.WriteLine($"[ConnectionTrigger] Found {devices.Count} devices via selector");
 
-                        // Access the device object (sometimes triggers connection)
-                        var btDevice = await BluetoothDevice.FromIdAsync(devInfo.Id);
-                        if (btDevice != null)
+                        foreach (var devInfo in devices)
                         {
-                            // Access various properties to trigger activity
-                            var name = btDevice.Name;
-                            var status = btDevice.ConnectionStatus;
-                            Console.WriteLine($"[ConnectionTrigger] Accessed device: {name}, Status: {status}");
+                            Console.WriteLine($"[ConnectionTrigger] Checking device: {devInfo.Name}");
+
+                            // Access the device object (sometimes triggers connection)
+                            var btDevice = await BluetoothDevice.FromIdAsync(devInfo.Id);
+                            if (btDevice != null)
+                            {
+                                // Access various properties to trigger activity
+                                var name = btDevice.Name;
+                                var status = btDevice.ConnectionStatus;
+                                Console.WriteLine($"[ConnectionTrigger] Accessed device: {name}, Status: {status}");
+                            }
                         }
+                    }
+                    else
+                    {
+                        Console.WriteLine("[ConnectionTrigger] Device selector timeout after 3s");
                     }
                 }
                 catch (Exception ex)
@@ -92,7 +114,7 @@ namespace WinPods.App.Services
                     Console.WriteLine($"[ConnectionTrigger] Device selector failed: {ex.Message}");
                 }
 
-                // Attempt 6: Get device information
+                // Attempt 5: Get device information
                 Console.WriteLine("[ConnectionTrigger] Attempt 6: Getting device information...");
                 try
                 {

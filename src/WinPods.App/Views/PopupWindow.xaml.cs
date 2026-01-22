@@ -149,6 +149,9 @@ namespace WinPods.App.Views
         /// </summary>
         public async void ShowBattery(AirPodsState state, Services.AudioConnectionMonitor? audioMonitor)
         {
+            Console.WriteLine($"[PopupWindow] ShowBattery called - Model: {state.ModelName}, IsConnected: {state.IsConnected}");
+            Console.WriteLine($"[PopupWindow] Battery - Left: {state.Battery.Left.Percentage}%, Right: {state.Battery.Right.Percentage}%, Case: {state.Battery.Case.Percentage}%");
+
             // Stop any existing timer
             _autoDismissTimer?.Stop();
 
