@@ -1,9 +1,4 @@
-using System;
-using System.Diagnostics;
-using Windows.Devices.Bluetooth;
-using Windows.Devices.Bluetooth.GenericAttributeProfile;
-using Windows.Devices.Enumeration;
-using Windows.Storage.Streams;
+using WinPods.Core.AAP;
 
 namespace WinPods.App.Services
 {
@@ -14,34 +9,34 @@ namespace WinPods.App.Services
     {
         Off = 0,
         NoiseCancellation = 1,
-        Transparency = 2
+        Transparency = 2,
+        Adaptive = 3
     }
 
     /// <summary>
-    /// Service for controlling AirPods noise control via BLE GATT.
+    /// Service for controlling AirPods noise control via the AAP kernel driver.
+    /// This replaces the old GATT-based approach which does not work on Windows.
     /// </summary>
     public class NoiseControlService : IDisposable
     {
-        // GATT Service UUID for AirPods (Apple custom service)
-        private static readonly Guid AirPodsServiceUuid = Guid.Parse("0000FD02-0000-1000-8000-00805F9B34FB");
-
-        // GATT Characteristic UUID for Ancillary Data (includes noise control)
-        private static readonly Guid AncillaryDataCharacteristicUuid = Guid.Parse("0000FD03-0000-1000-8000-00805F9B34FB");
-
-        // Alternative: Device Information Service
-        private static readonly Guid DeviceInfoServiceUuid = Guid.Parse("0000180A-0000-1000-8000-00805F9B34FB");
-
-        // Alternative: Apple Custom Service
-        private static readonly Guid AppleCustomServiceUuid = Guid.Parse("06D1E5C7-2CB1-4E4E-A7B1-4B96F4F49F94");
-
-        private BluetoothLEDevice? _device;
-        private GattCharacteristic? _controlCharacteristic;
+        private readonly AAPConnection _aapConnection;
+        private readonly AAPNoiseControl _aapNoiseControl;
+        private readonly DriverService _driverService;
+        private readonly bool _ownsDriverService;
+        private readonly object _lock = new();
+        private bool _isDisposed;
         private NoiseControlMode _currentMode = NoiseControlMode.Off;
+        private ulong? _connectedAddress;
 
         /// <summary>
         /// Event raised when noise control mode changes.
         /// </summary>
         public event EventHandler<NoiseControlMode>? ModeChanged;
+
+        /// <summary>
+        /// Event raised when connection state changes.
+        /// </summary>
+        public event EventHandler<bool>? ConnectionStateChanged;
 
         /// <summary>
         /// Gets the current noise control mode.
@@ -51,199 +46,172 @@ namespace WinPods.App.Services
         /// <summary>
         /// Gets whether the service is connected to AirPods.
         /// </summary>
-        public bool IsConnected => _device != null && _controlCharacteristic != null;
+        public bool IsConnected => _aapNoiseControl.IsAvailable;
 
         /// <summary>
-        /// Connects to the AirPods and initializes GATT service.
+        /// Gets whether the driver is installed.
+        /// </summary>
+        public bool IsDriverInstalled => _driverService.IsInstalled;
+
+        /// <summary>
+        /// Gets the driver service for status checking.
+        /// </summary>
+        public DriverService Driver => _driverService;
+
+        /// <summary>
+        /// Creates a new NoiseControlService.
+        /// </summary>
+        public NoiseControlService()
+        {
+            _driverService = new DriverService();
+            _ownsDriverService = true;
+            _aapConnection = new AAPConnection(_driverService.GetBridge(), ownsDriver: false);
+            _aapNoiseControl = new AAPNoiseControl(_aapConnection, ownsConnection: false);
+
+            // Forward mode change events
+            _aapNoiseControl.ModeChanged += (s, mode) =>
+            {
+                _currentMode = ConvertFromAAPMode(mode);
+                ModeChanged?.Invoke(this, _currentMode);
+            };
+        }
+
+        /// <summary>
+        /// Creates a new NoiseControlService with an existing driver service.
+        /// </summary>
+        public NoiseControlService(DriverService driverService)
+        {
+            _driverService = driverService;
+            _ownsDriverService = false;
+            _aapConnection = new AAPConnection(_driverService.GetBridge(), ownsDriver: false);
+            _aapNoiseControl = new AAPNoiseControl(_aapConnection, ownsConnection: false);
+
+            _aapNoiseControl.ModeChanged += (s, mode) =>
+            {
+                _currentMode = ConvertFromAAPMode(mode);
+                ModeChanged?.Invoke(this, _currentMode);
+            };
+        }
+
+        /// <summary>
+        /// Connects to the AirPods via the AAP driver.
         /// </summary>
         public async Task<bool> ConnectAsync(ulong bluetoothAddress)
         {
-            try
+            ThrowIfDisposed();
+
+            Console.WriteLine($"[NoiseControl] ConnectAsync called for {bluetoothAddress:X12}");
+
+            // Check if driver is installed
+            if (!_driverService.IsInstalled)
             {
-                Console.WriteLine($"[NoiseControl] ========== Connection Attempt Started ==========");
-                Console.WriteLine($"[NoiseControl] Connecting to device {bluetoothAddress:X12}...");
+                Console.WriteLine("[NoiseControl] Driver not installed - noise control unavailable");
+                Console.WriteLine("[NoiseControl] This is a Windows limitation: AirPods use L2CAP (not GATT) for control");
+                return false;
+            }
 
-                // Connect to the Bluetooth LE device
-                _device = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress);
-                if (_device == null)
-                {
-                    Console.WriteLine("[NoiseControl] ❌ Failed to connect to device");
-                    return false;
-                }
+            // Open the driver if not already open
+            if (!_driverService.Open())
+            {
+                Console.WriteLine("[NoiseControl] Failed to open driver");
+                return false;
+            }
 
-                Console.WriteLine($"[NoiseControl] ✓ Connected to {_device.Name}");
-                Console.WriteLine($"[NoiseControl] Device ID: {_device.DeviceId}");
-                Console.WriteLine($"[NoiseControl] Connection Status: {_device.ConnectionStatus}");
+            // Connect via AAP
+            bool connected = await _aapNoiseControl.ConnectAsync(bluetoothAddress);
 
-                // Get ALL GATT services for debugging
-                var allServicesResult = await _device.GetGattServicesAsync();
-                if (allServicesResult.Status != GattCommunicationStatus.Success)
-                {
-                    Console.WriteLine($"[NoiseControl] ❌ Failed to get GATT services: {allServicesResult.Status}");
-                    Console.WriteLine($"[NoiseControl] Protocol Error: {allServicesResult.ProtocolError}");
-                    return false;
-                }
+            if (connected)
+            {
+                _connectedAddress = bluetoothAddress;
+                Console.WriteLine($"[NoiseControl] Connected to {bluetoothAddress:X12}");
+                ConnectionStateChanged?.Invoke(this, true);
+            }
+            else
+            {
+                Console.WriteLine($"[NoiseControl] Failed to connect to {bluetoothAddress:X12}");
+                ConnectionStateChanged?.Invoke(this, false);
+            }
 
-                var allServices = allServicesResult.Services;
-                Console.WriteLine($"[NoiseControl] ========== Found {allServices.Count} GATT Services ==========");
+            return connected;
+        }
 
-                // List ALL services
-                for (int i = 0; i < allServices.Count; i++)
-                {
-                    var service = allServices[i];
-                    Console.WriteLine($"[NoiseControl] Service {i}: {service.Uuid}");
+        /// <summary>
+        /// Sets the noise control mode.
+        /// </summary>
+        public async Task<bool> SetModeAsync(NoiseControlMode mode)
+        {
+            ThrowIfDisposed();
 
-                    // Get all characteristics for this service
-                    var charResult = await service.GetCharacteristicsAsync();
-                    if (charResult.Status == GattCommunicationStatus.Success)
-                    {
-                        Console.WriteLine($"[NoiseControl]   Has {charResult.Characteristics.Count} characteristics:");
+            Console.WriteLine($"[NoiseControl] SetModeAsync: {mode}");
 
-                        foreach (var characteristic in charResult.Characteristics)
-                        {
-                            var props = characteristic.CharacteristicProperties;
-                            Console.WriteLine($"[NoiseControl]     - {characteristic.Uuid}");
-                            Console.WriteLine($"[NoiseControl]       Properties: {props}");
-                            Console.WriteLine($"[NoiseControl]       Read: {(props & GattCharacteristicProperties.Read) != 0}");
-                            Console.WriteLine($"[NoiseControl]       Write: {(props & GattCharacteristicProperties.Write) != 0}");
-                            Console.WriteLine($"[NoiseControl]       WriteNoResponse: {(props & GattCharacteristicProperties.WriteWithoutResponse) != 0}");
-                            Console.WriteLine($"[NoiseControl]       Notify: {(props & GattCharacteristicProperties.Notify) != 0}");
-                            Console.WriteLine($"[NoiseControl]       Indicate: {(props & GattCharacteristicProperties.Indicate) != 0}");
+            if (!_aapNoiseControl.IsAvailable)
+            {
+                Console.WriteLine("[NoiseControl] Cannot set mode - not connected");
+                return false;
+            }
 
-                            // If writable, save it
-                            if ((props & GattCharacteristicProperties.Write) != 0 ||
-                                (props & GattCharacteristicProperties.WriteWithoutResponse) != 0)
-                            {
-                                if (_controlCharacteristic == null)
-                                {
-                                    _controlCharacteristic = characteristic;
-                                    Console.WriteLine($"[NoiseControl] ✓✓✓ SAVED as control characteristic!");
-                                }
-                            }
-                        }
-                    }
-                }
+            var aapMode = ConvertToAAPMode(mode);
+            var result = await _aapNoiseControl.SetModeAsync(aapMode);
 
-                if (_controlCharacteristic == null)
-                {
-                    Console.WriteLine("[NoiseControl] ❌❌❌ NO WRITABLE CHARACTERISTIC FOUND!");
-                    Console.WriteLine("[NoiseControl] This means AirPods don't expose control GATT characteristics on Windows");
-                    Console.WriteLine("[NoiseControl] Noise control requires low-level Bluetooth stack access (not available on Windows)");
-                    return false;
-                }
-
-                Console.WriteLine($"[NoiseControl] ✓✓✓ SUCCESS: Using characteristic {_controlCharacteristic.Uuid}");
-                Console.WriteLine($"[NoiseControl] ================================================");
+            if (result == AAPCommandResult.Success)
+            {
+                _currentMode = mode;
+                Console.WriteLine($"[NoiseControl] Mode set to {mode}");
                 return true;
             }
-            catch (Exception ex)
+            else
             {
-                Console.WriteLine($"[NoiseControl] ❌ Connection failed: {ex.Message}");
-                Console.WriteLine($"[NoiseControl] Stack trace: {ex.StackTrace}");
+                Console.WriteLine($"[NoiseControl] Failed to set mode: {result}");
                 return false;
             }
         }
 
         /// <summary>
-        /// Sets the noise control mode using AACP (Apple Audio Control Protocol).
+        /// Sets noise control to Off.
         /// </summary>
-        public async Task<bool> SetModeAsync(NoiseControlMode mode)
+        public Task<bool> SetOffAsync() => SetModeAsync(NoiseControlMode.Off);
+
+        /// <summary>
+        /// Sets noise control to Active Noise Cancellation.
+        /// </summary>
+        public Task<bool> SetNoiseCancellationAsync() => SetModeAsync(NoiseControlMode.NoiseCancellation);
+
+        /// <summary>
+        /// Sets noise control to Transparency.
+        /// </summary>
+        public Task<bool> SetTransparencyAsync() => SetModeAsync(NoiseControlMode.Transparency);
+
+        /// <summary>
+        /// Sets noise control to Adaptive (AirPods Pro 2 only).
+        /// </summary>
+        public Task<bool> SetAdaptiveAsync() => SetModeAsync(NoiseControlMode.Adaptive);
+
+        /// <summary>
+        /// Cycles through noise control modes.
+        /// </summary>
+        public async Task<bool> CycleModeAsync()
         {
-            try
+            var nextMode = _currentMode switch
             {
-                Console.WriteLine($"[NoiseControl] ========== Setting Mode ==========");
-                Console.WriteLine($"[NoiseControl] Requested mode: {mode}");
+                NoiseControlMode.Off => NoiseControlMode.NoiseCancellation,
+                NoiseControlMode.NoiseCancellation => NoiseControlMode.Transparency,
+                NoiseControlMode.Transparency => NoiseControlMode.Off,
+                NoiseControlMode.Adaptive => NoiseControlMode.Off,
+                _ => NoiseControlMode.Off
+            };
 
-                if (_controlCharacteristic == null)
-                {
-                    Console.WriteLine("[NoiseControl] ❌ Control characteristic not available!");
-                    Console.WriteLine("[NoiseControl] Call ConnectAsync() first to find a writable characteristic");
-                    return false;
-                }
+            return await SetModeAsync(nextMode);
+        }
 
-                if (_device == null)
-                {
-                    Console.WriteLine("[NoiseControl] ❌ Device not connected");
-                    return false;
-                }
+        /// <summary>
+        /// Gets the current mode from the device.
+        /// </summary>
+        public async Task<NoiseControlMode?> GetCurrentModeAsync()
+        {
+            ThrowIfDisposed();
 
-                // AACP Packet format (from librepods reverse engineering):
-                // 04 00 04 00 [opcode, little endian] [identifier] [data1] [data2] [data3] [data4]
-                // Opcode 0x09 = Control Command
-                // Identifier 0x0D = ListeningMode
-                // Mode values: 0x01 = Off, 0x02 = ANC, 0x03 = Transparency, 0x04 = Adaptive
-
-                byte aacpMode = mode switch
-                {
-                    NoiseControlMode.Off => 0x01,
-                    NoiseControlMode.NoiseCancellation => 0x02,
-                    NoiseControlMode.Transparency => 0x03,
-                    _ => 0x01
-                };
-
-                byte[] command = new byte[11];
-                command[0] = 0x04;  // AACP Header
-                command[1] = 0x00;
-                command[2] = 0x04;
-                command[3] = 0x00;
-                command[4] = 0x09;  // Opcode: Control Command (little endian)
-                command[5] = 0x00;
-                command[6] = 0x0D;  // Identifier: ListeningMode
-                command[7] = aacpMode;  // Mode value
-                command[8] = 0x00;  // Unused
-                command[9] = 0x00;  // Unused
-                command[10] = 0x00; // Unused
-
-                string hexPacket = BitConverter.ToString(command);
-                Console.WriteLine($"[NoiseControl] AACP Packet: {hexPacket}");
-                Console.WriteLine($"[NoiseControl] Target Characteristic: {_controlCharacteristic.Uuid}");
-                Console.WriteLine($"[NoiseControl] Characteristic Properties: {_controlCharacteristic.CharacteristicProperties}");
-                Console.WriteLine($"[NoiseControl] Device Connection Status: {_device.ConnectionStatus}");
-
-                var writer = new DataWriter();
-                writer.WriteBytes(command);
-                var buffer = writer.DetachBuffer();
-
-                Console.WriteLine($"[NoiseControl] Buffer length: {buffer.Length} bytes");
-
-                // Try write without response first (faster)
-                Console.WriteLine("[NoiseControl] Attempting WriteValueAsync...");
-                var writeResult = await _controlCharacteristic.WriteValueAsync(buffer);
-
-                Console.WriteLine($"[NoiseControl] Write result: {writeResult}");
-
-                if (writeResult == GattCommunicationStatus.Success)
-                {
-                    _currentMode = mode;
-                    ModeChanged?.Invoke(this, mode);
-                    Console.WriteLine($"[NoiseControl] ✓✓✓ SUCCESS! Mode set to {mode}");
-                    Console.WriteLine($"[NoiseControl] ========================================");
-                    return true;
-                }
-                else if (writeResult == GattCommunicationStatus.Unreachable)
-                {
-                    Console.WriteLine("[NoiseControl] ❌ Device unreachable - may need to reconnect");
-                }
-                else if (writeResult == GattCommunicationStatus.ProtocolError)
-                {
-                    Console.WriteLine("[NoiseControl] ❌ Protocol error - packet format may be wrong");
-                }
-                else if (writeResult == GattCommunicationStatus.AccessDenied)
-                {
-                    Console.WriteLine("[NoiseControl] ❌ Access denied - characteristic may not be writable");
-                }
-
-                Console.WriteLine($"[NoiseControl] ❌ FAILED to set mode to {mode}");
-                Console.WriteLine($"[NoiseControl] ========================================");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[NoiseControl] ❌ SetMode failed: {ex.Message}");
-                Console.WriteLine($"[NoiseControl] Exception type: {ex.GetType().Name}");
-                Console.WriteLine($"[NoiseControl] Stack trace: {ex.StackTrace}");
-                return false;
-            }
+            var aapMode = await _aapNoiseControl.GetCurrentModeAsync();
+            return aapMode.HasValue ? ConvertFromAAPMode(aapMode.Value) : null;
         }
 
         /// <summary>
@@ -251,25 +219,70 @@ namespace WinPods.App.Services
         /// </summary>
         public void Disconnect()
         {
-            try
-            {
-                _controlCharacteristic = null;
-                _device?.Dispose();
-                _device = null;
-                Debug.WriteLine("[NoiseControl] Disconnected");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[NoiseControl] Disconnect error: {ex.Message}");
-            }
+            ThrowIfDisposed();
+
+            _aapNoiseControl.Disconnect();
+            _connectedAddress = null;
+            ConnectionStateChanged?.Invoke(this, false);
+            Console.WriteLine("[NoiseControl] Disconnected");
         }
 
         /// <summary>
-        /// Disposes the noise control service.
+        /// Checks if a specific noise control mode is supported.
         /// </summary>
+        public bool IsModeSupported(NoiseControlMode mode)
+        {
+            return _aapNoiseControl.IsModeSupported(ConvertToAAPMode(mode));
+        }
+
+        private static AAPNoiseMode ConvertToAAPMode(NoiseControlMode mode)
+        {
+            return mode switch
+            {
+                NoiseControlMode.Off => AAPNoiseMode.Off,
+                NoiseControlMode.NoiseCancellation => AAPNoiseMode.NoiseCancellation,
+                NoiseControlMode.Transparency => AAPNoiseMode.Transparency,
+                NoiseControlMode.Adaptive => AAPNoiseMode.Adaptive,
+                _ => AAPNoiseMode.Off
+            };
+        }
+
+        private static NoiseControlMode ConvertFromAAPMode(AAPNoiseMode mode)
+        {
+            return mode switch
+            {
+                AAPNoiseMode.Off => NoiseControlMode.Off,
+                AAPNoiseMode.NoiseCancellation => NoiseControlMode.NoiseCancellation,
+                AAPNoiseMode.Transparency => NoiseControlMode.Transparency,
+                AAPNoiseMode.Adaptive => NoiseControlMode.Adaptive,
+                _ => NoiseControlMode.Off
+            };
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_isDisposed)
+                throw new ObjectDisposedException(nameof(NoiseControlService));
+        }
+
         public void Dispose()
         {
-            Disconnect();
+            lock (_lock)
+            {
+                if (_isDisposed)
+                    return;
+
+                _isDisposed = true;
+                _aapNoiseControl.Dispose();
+                _aapConnection.Dispose();
+
+                if (_ownsDriverService)
+                {
+                    _driverService.Dispose();
+                }
+            }
+
+            GC.SuppressFinalize(this);
         }
     }
 }

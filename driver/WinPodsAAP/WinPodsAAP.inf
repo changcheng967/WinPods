@@ -1,0 +1,82 @@
+;
+; WinPodsAAP.inf - KMDF L2CAP Bridge Driver for AirPods
+; This driver enables userspace applications to communicate with AirPods
+; via the Apple Accessory Protocol (AAP) over L2CAP.
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Bluetooth
+ClassGuid   = {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Provider    = %ManufacturerName%
+DriverVer   = 03/05/2026,1.0.0.0
+CatalogFile = WinPodsAAP.cat
+
+[DestinationDirs]
+DefaultDestDir = 12
+WinPodsAAP_Device_CoInstaller_CopyFiles = 11
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+WinPodsAAP.sys = 1,,
+
+[Manufacturer]
+%ManufacturerName% = Standard, NT$ARCH$
+
+[Standard.NT$ARCH$]
+%WinPodsAAP.DeviceDesc% = WinPodsAAP_Device, Root\WinPodsAAP
+
+[WinPodsAAP_Device.NT]
+CopyFiles = Drivers_Dir
+
+[Drivers_Dir]
+WinPodsAAP.sys,,0x00004000  ; COPYFLG_IN_USE_TRY_RENAME
+
+[WinPodsAAP_Device.NT.Interfaces]
+AddInterface = {e3a4b7f8-1c2d-4a5b-9e6f-0d1a2b3c4d5e} , "WinPodsAAP", WinPodsAAP_Iface
+
+[WinPodsAAP_Iface]
+AddReg = WinPodsAAP_Iface_AddReg
+
+[WinPodsAAP_Iface_AddReg]
+HKR,,CLSID,,{e3a4b7f8-1c2d-4a5b-9e6f-0d1a2b3c4d5e}
+
+[WinPodsAAP_Device.NT.Services]
+AddService = WinPodsAAP,%SPSVCINST_ASSOCSERVICE%, WinPodsAAP_Service_Inst
+
+[WinPodsAAP_Service_Inst]
+DisplayName    = %WinPodsAAP.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\WinPodsAAP.sys
+AddReg         = WinPodsAAP_Service_AddReg
+
+[WinPodsAAP_Service_AddReg]
+; Add Bluetooth profile driver registration
+HKR,"Parameters","BluetoothPortDriver",0x00010001,1
+
+[WinPodsAAP_Device.NT.Wdf]
+KmdfService = WinPodsAAP, WinPodsAAP_wdfsect
+
+[WinPodsAAP_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[WinPodsAAP_Device_CoInstaller_CopyFiles]
+WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll
+
+[WinPodsAAP_Device.NT.CoInstallers]
+AddReg = WinPodsAAP_Device_CoInstallers_AddReg
+CopyFiles = WinPodsAAP_Device_CoInstaller_CopyFiles
+
+[WinPodsAAP_Device_CoInstallers_AddReg]
+HKR,,CoInstallers32,0x00010000, "WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll,WdfCoInstaller"
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName = "WinPods"
+DiskName = "WinPods AAP Driver Installation Disk"
+WinPodsAAP.DeviceDesc = "WinPods AAP L2CAP Bridge"
+WinPodsAAP.SVCDESC = "WinPods AAP L2CAP Bridge Driver"

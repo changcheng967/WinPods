@@ -276,12 +276,30 @@ namespace WinPods.App.Views
                         _noiseControlService = new NoiseControlService();
                         bool connected = await _noiseControlService.ConnectAsync(_bluetoothAddress.Value);
                         Console.WriteLine($"[PopupWindow] Noise control service connection: {connected}");
+
+                        // Update UI on main thread
+                        this.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            UpdateNoiseControlUI(connected);
+                        });
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[PopupWindow] Noise control service error: {ex.Message}");
+                        this.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            UpdateNoiseControlUI(false);
+                        });
                     }
                 });
+            }
+            else if (_noiseControlService != null)
+            {
+                UpdateNoiseControlUI(_noiseControlService.IsConnected);
+            }
+            else
+            {
+                UpdateNoiseControlUI(false);
             }
 
             // Only start auto-dismiss timer if NOT in Connecting state
@@ -533,6 +551,15 @@ namespace WinPods.App.Views
         }
 
         /// <summary>
+        /// Handles Adaptive button click.
+        /// </summary>
+        private void OnAdaptiveClick(object sender, RoutedEventArgs e)
+        {
+            SetNoiseControlMode(Services.NoiseControlMode.Adaptive);
+            System.Diagnostics.Debug.WriteLine("[PopupWindow] Adaptive selected");
+        }
+
+        /// <summary>
         /// Sets the noise control mode and updates button appearance.
         /// </summary>
         private void SetNoiseControlMode(Services.NoiseControlMode mode)
@@ -556,6 +583,8 @@ namespace WinPods.App.Views
             TransparencyButton.Foreground = inactiveForeground;
             NoiseOffButton.Background = inactiveBackground;
             NoiseOffButton.Foreground = inactiveForeground;
+            AdaptiveButton.Background = inactiveBackground;
+            AdaptiveButton.Foreground = inactiveForeground;
 
             // Highlight active button
             switch (mode)
@@ -572,9 +601,13 @@ namespace WinPods.App.Views
                     NoiseOffButton.Background = activeBackground;
                     NoiseOffButton.Foreground = activeForeground;
                     break;
+                case Services.NoiseControlMode.Adaptive:
+                    AdaptiveButton.Background = activeBackground;
+                    AdaptiveButton.Foreground = activeForeground;
+                    break;
             }
 
-            // Send command to AirPods via BLE GATT
+            // Send command to AirPods via AAP
             SendNoiseControlCommand(mode);
         }
 
@@ -592,6 +625,91 @@ namespace WinPods.App.Views
             else
             {
                 System.Diagnostics.Debug.WriteLine("[PopupWindow] Noise control service not available");
+            }
+        }
+
+        /// <summary>
+        /// Updates noise control UI based on connection status.
+        /// </summary>
+        private void UpdateNoiseControlUI(bool connected)
+        {
+            bool driverInstalled = _noiseControlService?.IsDriverInstalled ?? false;
+            bool isAvailable = connected && driverInstalled;
+
+            // Enable/disable buttons
+            NoiseCancellationButton.IsEnabled = isAvailable;
+            TransparencyButton.IsEnabled = isAvailable;
+            NoiseOffButton.IsEnabled = isAvailable;
+
+            // Show Adaptive button only if supported
+            bool supportsAdaptive = _noiseControlService?.IsModeSupported(Services.NoiseControlMode.Adaptive) ?? false;
+            AdaptiveButton.IsEnabled = isAvailable && supportsAdaptive;
+            AdaptiveButton.Visibility = supportsAdaptive ? Visibility.Visible : Visibility.Collapsed;
+
+            // Update label based on status
+            if (!driverInstalled)
+            {
+                NoiseControlLabel.Text = "Noise Control (Driver Required)";
+            }
+            else if (!connected)
+            {
+                NoiseControlLabel.Text = "Noise Control (Connecting...)";
+            }
+            else
+            {
+                NoiseControlLabel.Text = "Noise Control";
+
+                // Update current mode from service
+                var currentMode = _noiseControlService?.CurrentMode ?? Services.NoiseControlMode.Off;
+                SetNoiseControlModeVisual(currentMode);
+            }
+
+            Console.WriteLine($"[PopupWindow] Noise control UI updated - Available: {isAvailable}, Driver: {driverInstalled}");
+        }
+
+        /// <summary>
+        /// Sets the noise control mode visually without sending command.
+        /// </summary>
+        private void SetNoiseControlModeVisual(Services.NoiseControlMode mode)
+        {
+            _currentNoiseMode = mode;
+
+            var inactiveBackground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                Windows.UI.Color.FromArgb(255, 44, 44, 46));
+            var inactiveForeground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                Windows.UI.Color.FromArgb(255, 142, 142, 147));
+            var activeBackground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                Windows.UI.Color.FromArgb(255, 0, 122, 255));
+            var activeForeground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                Windows.UI.Color.FromArgb(255, 255, 255, 255));
+
+            NoiseCancellationButton.Background = inactiveBackground;
+            NoiseCancellationButton.Foreground = inactiveForeground;
+            TransparencyButton.Background = inactiveBackground;
+            TransparencyButton.Foreground = inactiveForeground;
+            NoiseOffButton.Background = inactiveBackground;
+            NoiseOffButton.Foreground = inactiveForeground;
+            AdaptiveButton.Background = inactiveBackground;
+            AdaptiveButton.Foreground = inactiveForeground;
+
+            switch (mode)
+            {
+                case Services.NoiseControlMode.NoiseCancellation:
+                    NoiseCancellationButton.Background = activeBackground;
+                    NoiseCancellationButton.Foreground = activeForeground;
+                    break;
+                case Services.NoiseControlMode.Transparency:
+                    TransparencyButton.Background = activeBackground;
+                    TransparencyButton.Foreground = activeForeground;
+                    break;
+                case Services.NoiseControlMode.Off:
+                    NoiseOffButton.Background = activeBackground;
+                    NoiseOffButton.Foreground = activeForeground;
+                    break;
+                case Services.NoiseControlMode.Adaptive:
+                    AdaptiveButton.Background = activeBackground;
+                    AdaptiveButton.Foreground = activeForeground;
+                    break;
             }
         }
 

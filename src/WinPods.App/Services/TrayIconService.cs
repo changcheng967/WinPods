@@ -305,16 +305,33 @@ namespace WinPods.App.Services
                 return;
             }
 
-            // Create Noise Control submenu (disabled on Windows - GATT not accessible)
+            // Create Noise Control submenu
             IntPtr hNoiseMenu = CreatePopupMenu();
-            AppendMenu(hNoiseMenu, MF_STRING | MF_GRAYED, MENU_NOISE_ANC, "Noise Cancellation (Windows limitation)");
-            AppendMenu(hNoiseMenu, MF_STRING | MF_GRAYED, MENU_NOISE_TRANSPARENCY, "Transparency (Windows limitation)");
-            AppendMenu(hNoiseMenu, MF_STRING | MF_GRAYED, MENU_NOISE_OFF, "Off (Windows limitation)");
+
+            bool noiseControlAvailable = _noiseControlService?.IsConnected == true;
+            NoiseControlMode currentMode = _noiseControlService?.CurrentMode ?? NoiseControlMode.Off;
+
+            // Add menu items with checkmarks for current mode
+            uint ancFlags = (uint)(MF_STRING | (noiseControlAvailable ? 0 : MF_GRAYED) | (currentMode == NoiseControlMode.NoiseCancellation ? MF_CHECKED : 0));
+            uint transFlags = (uint)(MF_STRING | (noiseControlAvailable ? 0 : MF_GRAYED) | (currentMode == NoiseControlMode.Transparency ? MF_CHECKED : 0));
+            uint offFlags = (uint)(MF_STRING | (noiseControlAvailable ? 0 : MF_GRAYED) | (currentMode == NoiseControlMode.Off ? MF_CHECKED : 0));
+
+            AppendMenu(hNoiseMenu, ancFlags, MENU_NOISE_ANC, "Noise Cancellation");
+            AppendMenu(hNoiseMenu, transFlags, MENU_NOISE_TRANSPARENCY, "Transparency");
+            AppendMenu(hNoiseMenu, offFlags, MENU_NOISE_OFF, "Off");
+
+            // Add Adaptive mode if supported
+            if (_noiseControlService?.IsModeSupported(NoiseControlMode.Adaptive) == true)
+            {
+                uint adaptiveFlags = (uint)(MF_STRING | (noiseControlAvailable ? 0 : MF_GRAYED) | (currentMode == NoiseControlMode.Adaptive ? MF_CHECKED : 0));
+                AppendMenu(hNoiseMenu, adaptiveFlags, MENU_NOISE_ADAPTIVE, "Adaptive");
+            }
 
             // Add menu items in order
             AppendMenu(hMenu, MF_STRING, MENU_PLAY_PAUSE, "Play/Pause Media");
             AppendMenu(hMenu, MF_SEPARATOR, 0, null);
-            InsertMenu(hMenu, 2, MF_BYPOSITION | MF_POPUP, (uint)hNoiseMenu.ToInt32(), "Noise Control");
+            InsertMenu(hMenu, 2, MF_BYPOSITION | MF_POPUP, (uint)hNoiseMenu.ToInt32(),
+                noiseControlAvailable ? "Noise Control" : "Noise Control (Driver Required)");
             AppendMenu(hMenu, MF_SEPARATOR, 0, null);
             AppendMenu(hMenu, MF_STRING, MENU_SHOW_POPUP, "Show Popup");
             AppendMenu(hMenu, MF_STRING, MENU_SETTINGS, "Settings");
@@ -374,6 +391,11 @@ namespace WinPods.App.Services
                 OnNoiseControlClick(NoiseControlMode.Off);
                 Console.WriteLine("[TrayIconService] Menu: Noise Off clicked");
             }
+            else if (menuId == MENU_NOISE_ADAPTIVE)
+            {
+                OnNoiseControlClick(NoiseControlMode.Adaptive);
+                Console.WriteLine("[TrayIconService] Menu: Adaptive clicked");
+            }
         }
 
         /// <summary>
@@ -413,10 +435,61 @@ namespace WinPods.App.Services
         /// </summary>
         private async void OnNoiseControlClick(NoiseControlMode mode)
         {
-            // Show notification explaining Windows limitation
-            await ShowNotificationAsync("Noise Control Unavailable",
-                "Noise control requires kernel-level Bluetooth access. This is a Windows limitation, not a bug.\n\n" +
-                "Consider using MagicPods (requires kernel driver) or use your iPhone to change noise control modes.");
+            if (_noiseControlService == null)
+            {
+                await ShowNotificationAsync("Noise Control Unavailable",
+                    "Noise control service is not initialized.");
+                return;
+            }
+
+            if (!_noiseControlService.IsConnected)
+            {
+                if (!_noiseControlService.IsDriverInstalled)
+                {
+                    await ShowNotificationAsync("Driver Required",
+                        "Noise control requires the WinPods kernel driver.\n\n" +
+                        "Install the driver from Settings to enable noise control features.");
+                }
+                else if (_bluetoothAddress.HasValue)
+                {
+                    // Try to connect
+                    await ShowNotificationAsync("Connecting...",
+                        "Attempting to connect to AirPods for noise control...");
+                    bool connected = await _noiseControlService.ConnectAsync(_bluetoothAddress.Value);
+                    if (connected)
+                    {
+                        await _noiseControlService.SetModeAsync(mode);
+                    }
+                    else
+                    {
+                        await ShowNotificationAsync("Connection Failed",
+                            "Could not connect to AirPods for noise control.");
+                    }
+                }
+                else
+                {
+                    await ShowNotificationAsync("No Device",
+                        "No AirPods connected. Connect your AirPods first.");
+                }
+                return;
+            }
+
+            bool success = await _noiseControlService.SetModeAsync(mode);
+            if (success)
+            {
+                string modeName = mode switch
+                {
+                    NoiseControlMode.NoiseCancellation => "Noise Cancellation",
+                    NoiseControlMode.Transparency => "Transparency",
+                    NoiseControlMode.Adaptive => "Adaptive",
+                    _ => "Off"
+                };
+                Console.WriteLine($"[TrayIconService] Noise control set to {modeName}");
+            }
+            else
+            {
+                await ShowNotificationAsync("Error", "Failed to change noise control mode.");
+            }
         }
 
         /// <summary>
@@ -668,6 +741,7 @@ namespace WinPods.App.Services
         private const int MF_SEPARATOR = 0x00000800;
         private const int MF_STRING = 0x00000000;
         private const int MF_GRAYED = 0x00000001;
+        private const int MF_CHECKED = 0x00000008;
         private const int TPM_BOTTOMALIGN = 0x0020;
         private const int TPM_LEFTALIGN = 0x0000;
 
@@ -679,6 +753,7 @@ namespace WinPods.App.Services
         private const int MENU_NOISE_ANC = 105;
         private const int MENU_NOISE_TRANSPARENCY = 106;
         private const int MENU_NOISE_OFF = 107;
+        private const int MENU_NOISE_ADAPTIVE = 108;
 
         [DllImport("user32.dll")]
         private static extern bool InsertMenu(
