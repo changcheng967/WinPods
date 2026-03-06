@@ -1,7 +1,22 @@
 ;
 ; WinPodsAAP.inf - KMDF L2CAP Bridge Driver for AirPods
+;
 ; This driver enables userspace applications to communicate with AirPods
-; via the Apple Accessory Protocol (AAP) over L2CAP.
+; via the Apple Accessory Protocol (AAP) over L2CAP Bluetooth protocol.
+;
+; IMPORTANT: This driver creates a software device node (Root\WinPodsAAP).
+; It does NOT attach to a local Bluetooth radio. Instead, it connects to
+; remote Bluetooth devices (AirPods) using the Bluetooth address passed
+; via IOCTL from userspace. The driver uses the system's Bluetooth stack
+; through the BTH_PROFILE_DRIVER_INTERFACE.
+;
+; Installation:
+;   1. Build with Visual Studio + WDK
+;   2. Enable test signing: bcdedit /set testsigning on
+;   3. Install: pnputil /add-driver WinPodsAAP.inf /install
+;   4. After testing, disable test signing: bcdedit /set testsigning off
+;
+; For production use, this driver must be attestation-signed by Microsoft.
 ;
 
 [Version]
@@ -9,7 +24,7 @@ Signature   = "$WINDOWS NT$"
 Class       = Bluetooth
 ClassGuid   = {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
 Provider    = %ManufacturerName%
-DriverVer   = 03/05/2026,1.0.0.0
+DriverVer   = 03/05/2026,1.2.0.0
 CatalogFile = WinPodsAAP.cat
 
 [DestinationDirs]
@@ -26,6 +41,7 @@ WinPodsAAP.sys = 1,,
 %ManufacturerName% = Standard, NT$ARCH$
 
 [Standard.NT$ARCH$]
+; This creates a software device under the Root enumerator
 %WinPodsAAP.DeviceDesc% = WinPodsAAP_Device, Root\WinPodsAAP
 
 [WinPodsAAP_Device.NT]
@@ -35,7 +51,8 @@ CopyFiles = Drivers_Dir
 WinPodsAAP.sys,,0x00004000  ; COPYFLG_IN_USE_TRY_RENAME
 
 [WinPodsAAP_Device.NT.Interfaces]
-AddInterface = {e3a4b7f8-1c2d-4a5b-9e6f-0d1a2b3c4d5e} , "WinPodsAAP", WinPodsAAP_Iface
+; Device interface that userspace opens via CreateFile
+AddInterface = {e3a4b7f8-1c2d-4a5b-9e6f-0d1a2b3c4d5e}, "WinPodsAAP", WinPodsAAP_Iface
 
 [WinPodsAAP_Iface]
 AddReg = WinPodsAAP_Iface_AddReg
@@ -55,7 +72,7 @@ ServiceBinary  = %12%\WinPodsAAP.sys
 AddReg         = WinPodsAAP_Service_AddReg
 
 [WinPodsAAP_Service_AddReg]
-; Add Bluetooth profile driver registration
+; Mark as Bluetooth profile driver
 HKR,"Parameters","BluetoothPortDriver",0x00010001,1
 
 [WinPodsAAP_Device.NT.Wdf]

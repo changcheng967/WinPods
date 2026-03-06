@@ -4,6 +4,9 @@
  * This driver bridges L2CAP connections to userspace via DeviceIoControl,
  * enabling Windows applications to communicate with AirPods using the
  * Apple Accessory Protocol (AAP).
+ *
+ * Based on Microsoft's bthecho L2CAP sample driver pattern.
+ * Reference: https://github.com/microsoft/Windows-driver-samples/tree/main/bluetooth/bthecho
  */
 
 #ifndef _WINPODSAAP_H_
@@ -14,6 +17,7 @@
 #include <bthddi.h>
 #include <bthguid.h>
 #include <bthsdpddi.h>
+#include <bthdef.h>
 
 //=============================================================================
 // Driver Configuration
@@ -23,7 +27,7 @@
 DEFINE_GUID(GUID_WINPODSAAP_INTERFACE,
     0xe3a4b7f8, 0x1c2d, 0x4a5b, 0x9e, 0x6f, 0x0d, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e);
 
-// IOCTL definitions
+// IOCTL definitions - these MUST match the C# DriverBridge.cs
 #define FILE_DEVICE_WINPODS     0x8000
 #define IOCTL_WINPODS_CONNECT   CTL_CODE(FILE_DEVICE_WINPODS, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_WINPODS_DISCONNECT CTL_CODE(FILE_DEVICE_WINPODS, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -38,7 +42,7 @@ typedef enum _WINPODS_CONNECTION_STATE {
     WinPodsConnected = 2
 } WINPODS_CONNECTION_STATE;
 
-// IOCTL input/output structures
+// IOCTL input/output structures - MUST match C# DriverBridge.cs
 typedef struct _WINPODS_CONNECT_INPUT {
     ULONGLONG BluetoothAddress;
     USHORT PSM;
@@ -69,24 +73,29 @@ typedef struct _WINPODS_STATUS_OUTPUT {
 //=============================================================================
 
 typedef struct _DEVICE_CONTEXT {
-    // Bluetooth L2CAP connection state
+    // Bluetooth profile driver interface (from bus driver)
+    BTH_PROFILE_DRIVER_INTERFACE BthInterface;
+
+    // I/O target for BRB submission
+    WDFIOTARGET IoTarget;
+
+    // L2CAP connection state
     WINPODS_CONNECTION_STATE ConnectionState;
     BTH_ADDR RemoteAddress;
-    USHORT ChannelId;
     USHORT PSM;
+    L2CAP_CHANNEL_HANDLE ChannelHandle;
 
-    // BRB for Bluetooth operations
-    struct _BRB* CurrentBrb;
-
-    // Receive buffer
+    // Receive buffer management
     PUCHAR ReceiveBuffer;
     SIZE_T ReceiveBufferSize;
     SIZE_T ReceiveDataLength;
-    KEVENT ReceiveComplete;
 
     // Synchronization
     WDFSPINLOCK Lock;
-    KEVENT ConnectComplete;
+
+    // Completion events
+    KEVENT ConnectCompleteEvent;
+    KEVENT TransferCompleteEvent;
 
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
@@ -102,25 +111,31 @@ DRIVER_INITIALIZE DriverEntry;
 // WDF callbacks
 EVT_WDF_DRIVER_DEVICE_ADD WinPodsEvtDeviceAdd;
 EVT_WDF_OBJECT_CONTEXT_CLEANUP WinPodsEvtDriverContextCleanup;
-EVT_WDF_DEVICE_CONTEXT_CLEANUP WinPodsEvtDeviceContextCleanup;
+EVT_WDF_OBJECT_CONTEXT_CLEANUP WinPodsEvtDeviceContextCleanup;
 
 // IOCTL handlers
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL WinPodsEvtIoDeviceControl;
 
-// L2CAP callbacks
-VOID
-WinPodsChannelConnectComplete(
-    _In_ struct _BRB_L2CA_OPEN_CHANNEL* Brb,
-    _In_ NTSTATUS Status
+// BRB helper functions
+NTSTATUS
+WinPodsAllocateBrb(
+    _In_ BRB_TYPE BrbType,
+    _Out_ PBRB* Brb
 );
 
 VOID
-WinPodsChannelReceiveComplete(
-    _In_ struct _BRB_L2CA_ACL_TRANSFER* Brb,
-    _In_ NTSTATUS Status
+WinPodsFreeBrb(
+    _In_ PBRB Brb
 );
 
-// Helper functions
+NTSTATUS
+WinPodsSubmitBrbSynchronously(
+    _In_ PDEVICE_CONTEXT Context,
+    _Inout_ PBRB Brb,
+    _In_ ULONG TimeoutMs
+);
+
+// L2CAP operation functions
 NTSTATUS
 WinPodsConnectL2CAP(
     _In_ PDEVICE_CONTEXT Context,
@@ -148,6 +163,16 @@ WinPodsReceiveData(
     _In_ SIZE_T BufferSize,
     _Out_ PSIZE_T BytesReceived,
     _In_ ULONG TimeoutMs
+);
+
+// L2CAP indication callback (from Bluetooth stack)
+VOID
+WinPodsL2capIndicationCallback(
+    _In_ L2CAP_CHANNEL_HANDLE ChannelHandle,
+    _In_ ULONG Indication,
+    _In_ PVOID Parameters,
+    _In_ ULONG ParameterLength,
+    _In_opt_ PVOID Context
 );
 
 #endif // _WINPODSAAP_H_

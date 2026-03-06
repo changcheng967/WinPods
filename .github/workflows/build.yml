@@ -26,6 +26,9 @@ jobs:
     - name: Build solution
       run: dotnet build --configuration Release --no-restore
 
+    - name: Run tests
+      run: dotnet test --configuration Release --no-build --verbosity normal
+
     - name: Publish self-contained
       run: |
         dotnet publish src/WinPods.App/WinPods.App.csproj `
@@ -33,15 +36,63 @@ jobs:
           --runtime win-x64 `
           --self-contained `
           -p:PublishSingleFile=false `
-          -o release/WinPods-SelfContained
+          -o release/WinPods
+
+    - name: Copy driver source
+      run: |
+        Copy-Item -Path driver/WinPodsAAP/* -Destination release/WinPods/driver/ -Recurse -Force
 
     - name: Create release package
       run: |
-        Compress-Archive -Path release/WinPods-SelfContained/* `
-          -DestinationPath WinPods-v1.1.0-SelfContained.zip
+        Compress-Archive -Path release/WinPods/* `
+          -DestinationPath WinPods-v1.2.0.zip
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: WinPods-SelfContained
-        path: WinPods-v1.1.0-SelfContained.zip
+        name: WinPods-v1.2.0
+        path: WinPods-v1.2.0.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: WinPods-v1.2.0
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v1.2.0
+        name: WinPods v1.2.0
+        body: |
+          ## WinPods v1.2.0
+
+          ### Features
+          - Battery monitoring for AirPods
+          - Auto-connect functionality
+          - Media controls (play/pause, next/previous)
+          - System tray integration with battery status
+          - Global hotkeys (Ctrl+Alt+P, Ctrl+Alt+N)
+          - Low battery alerts
+
+          ### In Progress
+          - **Noise Control**: The AAP protocol layer and KMDF driver source are included in this release. The driver must be compiled with Visual Studio + WDK and installed manually. It has not yet been verified on real hardware.
+
+          ### Driver (For Development Only)
+          The `driver/` folder contains the kernel driver source code. To build and test:
+          1. Install Visual Studio 2022+ with C++ workload and WDK
+          2. Open `driver/WinPodsAAP/WinPodsAAP.vcxproj`
+          3. Build the driver
+          4. Enable test signing: `bcdedit /set testsigning on`
+          5. Install: `pnputil /add-driver WinPodsAAP.inf /install`
+          6. Test the app
+
+          **Note**: The driver is for development testing only and has not been attestation-signed by Microsoft.
+        files: WinPods-v1.2.0.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
