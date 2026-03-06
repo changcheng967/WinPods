@@ -560,45 +560,49 @@ WinPodsEvtIoDeviceControl(
 
 VOID
 WinPodsL2capIndicationCallback(
-    _In_ L2CAP_CHANNEL_HANDLE ChannelHandle,
-    _In_ ULONG Indication,
-    _In_ PVOID Parameters,
-    _In_ ULONG ParameterLength,
-    _In_opt_ PVOID Context
+    _In_opt_ PVOID Context,
+    _In_ INDICATION_CODE Indication,
+    _In_ PINDICATION_PARAMETERS Parameters
 )
 {
     PDEVICE_CONTEXT devCtx = (PDEVICE_CONTEXT)Context;
 
-    UNREFERENCED_PARAMETER(ChannelHandle);
-    UNREFERENCED_PARAMETER(Parameters);
-    UNREFERENCED_PARAMETER(ParameterLength);
-
-    KdPrint(("WinPodsAAP: L2CAP Indication: %lu\n", Indication));
+    KdPrint(("WinPodsAAP: L2CAP Indication: %d\n", Indication));
 
     if (devCtx == NULL) {
+        KdPrint(("WinPodsAAP: Indication callback with NULL context\n"));
+        return;
+    }
+
+    if (Parameters == NULL) {
+        KdPrint(("WinPodsAAP: Indication callback with NULL parameters\n"));
         return;
     }
 
     switch (Indication) {
-    case L2CAP_CHANNEL_DISCONNECTED:
-        KdPrint(("WinPodsAAP: Remote device disconnected\n"));
+    case IndicationRemoteDisconnect:
+        //
+        // The remote device has disconnected the L2CAP channel
+        // Parameters->Disconnect contains the disconnect details
+        //
+        KdPrint(("WinPodsAAP: Remote device disconnected (reason: 0x%X)\n",
+                 Parameters->Disconnect.Reason));
+
         WdfSpinLockAcquire(devCtx->Lock);
         devCtx->ConnectionState = WinPodsDisconnected;
         devCtx->ChannelHandle = NULL;
         devCtx->RemoteAddress = 0;
+        devCtx->PSM = 0;
         WdfSpinLockRelease(devCtx->Lock);
         break;
 
-    case L2CAP_CHANNEL_CLOSING:
-        KdPrint(("WinPodsAAP: Channel closing\n"));
-        break;
-
-    case L2CAP_CHANNEL_CLOSED:
-        KdPrint(("WinPodsAAP: Channel closed\n"));
+    case IndicationAddReference:
+    case IndicationReleaseReference:
+        // Reference counting - not needed for our simple implementation
         break;
 
     default:
-        KdPrint(("WinPodsAAP: Unknown indication: %lu\n", Indication));
+        KdPrint(("WinPodsAAP: Unhandled indication: %d\n", Indication));
         break;
     }
 }

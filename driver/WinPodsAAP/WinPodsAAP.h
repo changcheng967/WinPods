@@ -169,14 +169,12 @@ WinPodsReceiveData(
 );
 
 // L2CAP indication callback (from Bluetooth stack)
-// Signature matches INDICATION_CALLBACK from bthddi.h
+// Signature matches PFNBTHPORT_INDICATION_CALLBACK from bthddi.h
 VOID
 WinPodsL2capIndicationCallback(
-    _In_ L2CAP_CHANNEL_HANDLE ChannelHandle,
-    _In_ ULONG Indication,
-    _In_ PVOID Parameters,
-    _In_ ULONG ParameterLength,
-    _In_opt_ PVOID Context
+    _In_opt_ PVOID Context,
+    _In_ INDICATION_CODE Indication,
+    _In_ PINDICATION_PARAMETERS Parameters
 );
 
 #endif // _WINPODSAAP_H_
