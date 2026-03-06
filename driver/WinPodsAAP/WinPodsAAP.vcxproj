@@ -89,7 +89,7 @@
       <WarningLevel>Level3</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>NTDDI_VERSION=0x0A00000C;_WIN64;_AMD64_;AMD64;DEPRECATE_DDK_FUNCTIONS=1;NT;KMDF_VERSION_MAJOR=1;KMDF_MINIMUM_VERSION_REQUIRED=35;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NTDDI_VERSION=0x0A00000C;_WIN64;_AMD64_;AMD64;DEPRECATE_DDK_FUNCTIONS=1;NT;KMDF_VERSION_MAJOR=1;KMDF_VERSION_MINOR=35;KMDF_MINIMUM_VERSION_REQUIRED=35;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(WindowsSdkInstallRoot)Include\$(WindowsTargetPlatformVersion)\km;$(WindowsSdkInstallRoot)Include\$(WindowsTargetPlatformVersion)\km\crt;C:\Program Files (x86)\Windows Kits\10\Include\wdf\kmdf\1.35;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
@@ -104,7 +104,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
-      <PreprocessorDefinitions>NTDDI_VERSION=0x0A00000C;_WIN64;_AMD64_;AMD64;DEPRECATE_DDK_FUNCTIONS=1;NT;KMDF_VERSION_MAJOR=1;KMDF_MINIMUM_VERSION_REQUIRED=35;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NTDDI_VERSION=0x0A00000C;_WIN64;_AMD64_;AMD64;DEPRECATE_DDK_FUNCTIONS=1;NT;KMDF_VERSION_MAJOR=1;KMDF_VERSION_MINOR=35;KMDF_MINIMUM_VERSION_REQUIRED=35;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(WindowsSdkInstallRoot)Include\$(WindowsTargetPlatformVersion)\km;$(WindowsSdkInstallRoot)Include\$(WindowsTargetPlatformVersion)\km\crt;C:\Program Files (x86)\Windows Kits\10\Include\wdf\kmdf\1.35;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
@@ -120,7 +120,7 @@
       <WarningLevel>Level3</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>NTDDI_VERSION=0x0A00000C;_WIN64;_ARM64_;ARM64;DEPRECATE_DDK_FUNCTIONS=1;NT;KMDF_VERSION_MAJOR=1;KMDF_MINIMUM_VERSION_REQUIRED=35;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NTDDI_VERSION=0x0A00000C;_WIN64;_ARM64_;ARM64;DEPRECATE_DDK_FUNCTIONS=1;NT;KMDF_VERSION_MAJOR=1;KMDF_VERSION_MINOR=35;KMDF_MINIMUM_VERSION_REQUIRED=35;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(WindowsSdkInstallRoot)Include\$(WindowsTargetPlatformVersion)\km;$(WindowsSdkInstallRoot)Include\$(WindowsTargetPlatformVersion)\km\crt;C:\Program Files (x86)\Windows Kits\10\Include\wdf\kmdf\1.35;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
@@ -135,7 +135,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
-      <PreprocessorDefinitions>NTDDI_VERSION=0x0A00000C;_WIN64;_ARM64_;ARM64;DEPRECATE_DDK_FUNCTIONS=1;NT;KMDF_VERSION_MAJOR=1;KMDF_MINIMUM_VERSION_REQUIRED=35;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NTDDI_VERSION=0x0A00000C;_WIN64;_ARM64_;ARM64;DEPRECATE_DDK_FUNCTIONS=1;NT;KMDF_VERSION_MAJOR=1;KMDF_VERSION_MINOR=35;KMDF_MINIMUM_VERSION_REQUIRED=35;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(WindowsSdkInstallRoot)Include\$(WindowsTargetPlatformVersion)\km;$(WindowsSdkInstallRoot)Include\$(WindowsTargetPlatformVersion)\km\crt;C:\Program Files (x86)\Windows Kits\10\Include\wdf\kmdf\1.35;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
