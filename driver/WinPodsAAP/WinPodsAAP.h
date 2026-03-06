@@ -14,10 +14,10 @@
 
 #include <ntddk.h>
 #include <wdf.h>
+#include <bthdef.h>
 #include <bthddi.h>
 #include <bthguid.h>
 #include <bthsdpddi.h>
-#include <bthdef.h>
 
 //=============================================================================
 // Driver Configuration
