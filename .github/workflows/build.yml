@@ -40,6 +40,7 @@ jobs:
 
     - name: Copy driver source
       run: |
+        New-Item -ItemType Directory -Path release/WinPods/driver -Force
         Copy-Item -Path driver/WinPodsAAP/* -Destination release/WinPods/driver/ -Recurse -Force
 
     - name: Create release package

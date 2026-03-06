@@ -74,10 +74,14 @@ typedef struct _WINPODS_STATUS_OUTPUT {
 
 typedef struct _DEVICE_CONTEXT {
     // Bluetooth profile driver interface (from bus driver)
+    // Provides BthAllocateBrb, BthFreeBrb for BRB management
     BTH_PROFILE_DRIVER_INTERFACE BthInterface;
 
-    // I/O target for BRB submission
+    // I/O target for BRB submission via IOCTL_INTERNAL_BTH_SUBMIT_BRB
     WDFIOTARGET IoTarget;
+
+    // Flag indicating if we have a valid Bluetooth interface
+    BOOLEAN HasBthInterface;
 
     // L2CAP connection state
     WINPODS_CONNECTION_STATE ConnectionState;
@@ -131,8 +135,7 @@ WinPodsFreeBrb(
 NTSTATUS
 WinPodsSubmitBrbSynchronously(
     _In_ PDEVICE_CONTEXT Context,
-    _Inout_ PBRB Brb,
-    _In_ ULONG TimeoutMs
+    _Inout_ PBRB Brb
 );
 
 // L2CAP operation functions
@@ -166,6 +169,7 @@ WinPodsReceiveData(
 );
 
 // L2CAP indication callback (from Bluetooth stack)
+// Signature matches INDICATION_CALLBACK from bthddi.h
 VOID
 WinPodsL2capIndicationCallback(
     _In_ L2CAP_CHANNEL_HANDLE ChannelHandle,

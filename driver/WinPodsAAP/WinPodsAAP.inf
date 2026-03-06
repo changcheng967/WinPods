@@ -4,20 +4,91 @@
 ; This driver enables userspace applications to communicate with AirPods
 ; via the Apple Accessory Protocol (AAP) over L2CAP Bluetooth protocol.
 ;
-; IMPORTANT: This driver creates a software device node (Root\WinPodsAAP).
-; It does NOT attach to a local Bluetooth radio. Instead, it connects to
-; remote Bluetooth devices (AirPods) using the Bluetooth address passed
-; via IOCTL from userspace. The driver uses the system's Bluetooth stack
-; through the BTH_PROFILE_DRIVER_INTERFACE.
+; ============================================================================
+; IMPORTANT: DEVELOPMENT/TESTING INSTALLATION LIMITATIONS
+; ============================================================================
 ;
-; Installation:
-;   1. Build with Visual Studio + WDK
-;   2. Enable test signing: bcdedit /set testsigning on
-;   3. Install: pnputil /add-driver WinPodsAAP.inf /install
-;   4. After testing, disable test signing: bcdedit /set testsigning off
+; This INF installs the driver as a ROOT-ENUMERATED software device:
+;   Root\WinPodsAAP
 ;
-; For production use, this driver must be attestation-signed by Microsoft.
+; *** THIS CONFIGURATION HAS LIMITATIONS: ***
 ;
+; 1. NO BLUETOOTH BUS CONNECTION
+;    - The driver is NOT enumerated under the Bluetooth bus (BTHENUM)
+;    - WdfFdoQueryForInterface(GUID_BTH_PROFILE_DRIVER_INTERFACE) will FAIL
+;    - The driver cannot access BthAllocateBrb/BthFreeBrb from the bus driver
+;    - BRB allocation falls back to our own ExAllocatePool2 implementation
+;
+; 2. L2CAP OPERATIONS MAY NOT WORK
+;    - Without proper Bluetooth bus enumeration, BRB submission via
+;      IOCTL_INTERNAL_BTH_SUBMIT_BRB may fail
+;    - The IoTarget may not have a path to the Bluetooth stack
+;    - Real L2CAP connections to AirPods will likely fail
+;
+; 3. THIS IS FOR DEVELOPMENT/TESTING ONLY
+;    - The driver can be loaded and its IOCTL interface tested
+;    - Use this configuration to verify the driver loads correctly
+;    - Use this to test the userspace C# app integration
+;
+; ============================================================================
+; FOR REAL BLUETOOTH FUNCTIONALITY (NOT IMPLEMENTED IN THIS INF):
+; ============================================================================
+;
+; To get real L2CAP connectivity, the driver must be enumerated under BTHENUM:
+;
+;   [Standard.NT$ARCH$]
+;   %WinPodsAAP.DeviceDesc% = WinPodsAAP_Device, BTHENUM\{E3A4B7F8-1C2D-4A5B-9E6F-0D1A2B3C4D5E}
+;
+; This requires:
+;   1. A proper Bluetooth service UUID
+;   2. Installation on a machine with a working Bluetooth radio
+;   3. The driver being loaded when the Bluetooth stack initializes
+;
+; The BTHENUM configuration will provide:
+;   - BTH_PROFILE_DRIVER_INTERFACE via WdfFdoQueryForInterface
+;   - Proper BRB allocation via BthAllocateBrb
+;   - Working BRB submission to the Bluetooth stack
+;   - Real L2CAP connections to remote devices
+;
+; ============================================================================
+; BUILDING AND INSTALLING
+; ============================================================================
+;
+; Build Requirements:
+;   - Visual Studio 2022 or later
+;   - Windows Driver Kit (WDK) 11
+;   - "Desktop development with C++" workload
+;
+; Build Steps:
+;   1. Open WinPodsAAP.vcxproj in Visual Studio
+;   2. Select Release|x64 configuration
+;   3. Build -> Build Solution
+;
+; Install Steps (Test Signing Required):
+;   1. Enable test signing: bcdedit /set testsigning on
+;   2. Restart Windows
+;   3. Install driver: pnputil /add-driver WinPodsAAP.inf /install
+;   4. The device should appear under "Software devices" in Device Manager
+;   5. Test the WinPods application
+;
+; Uninstall:
+;   pnputil /delete-driver oem##.inf /uninstall /force
+;
+; After Testing:
+;   bcdedit /set testsigning off
+;   Restart Windows
+;
+; ============================================================================
+; PRODUCTION DEPLOYMENT
+; ============================================================================
+;
+; For production use, this driver must be:
+;   1. Signed with an Extended Validation (EV) code signing certificate
+;   2. Submitted to Microsoft Hardware Dashboard
+;   3. Attestation-signed by Microsoft
+;   4. Distributed through Windows Update or proper installation media
+;
+; ============================================================================
 
 [Version]
 Signature   = "$WINDOWS NT$"
@@ -41,6 +112,7 @@ WinPodsAAP.sys = 1,,
 %ManufacturerName% = Standard, NT$ARCH$
 
 [Standard.NT$ARCH$]
+; SOFTWARE DEVICE - See limitations above
 ; This creates a software device under the Root enumerator
 %WinPodsAAP.DeviceDesc% = WinPodsAAP_Device, Root\WinPodsAAP
 
@@ -51,7 +123,8 @@ CopyFiles = Drivers_Dir
 WinPodsAAP.sys,,0x00004000  ; COPYFLG_IN_USE_TRY_RENAME
 
 [WinPodsAAP_Device.NT.Interfaces]
-; Device interface that userspace opens via CreateFile
+; Device interface GUID that userspace opens via CreateFile
+; {E3A4B7F8-1C2D-4A5B-9E6F-0D1A2B3C4D5E}
 AddInterface = {e3a4b7f8-1c2d-4a5b-9e6f-0d1a2b3c4d5e}, "WinPodsAAP", WinPodsAAP_Iface
 
 [WinPodsAAP_Iface]

@@ -15,12 +15,9 @@
 // Global Variables
 //=============================================================================
 
-// Pool tag for allocations
 #define WINPODS_POOL_TAG 'PDAW'
-
-// Default timeouts
-#define DEFAULT_CONNECT_TIMEOUT_MS  10000
-#define DEFAULT_TRANSFER_TIMEOUT_MS 5000
+#define DEFAULT_TIMEOUT_MS 5000
+#define RECEIVE_BUFFER_SIZE 4096
 
 //=============================================================================
 // Forward declarations
@@ -56,6 +53,7 @@ WinPodsAllocateBrb(
         brbSize = sizeof(struct _BRB_L2CA_ACL_TRANSFER);
         break;
     default:
+        KdPrint(("WinPodsAAP: Invalid BRB type: %d\n", BrbType));
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -67,6 +65,7 @@ WinPodsAllocateBrb(
     );
 
     if (brb == NULL) {
+        KdPrint(("WinPodsAAP: Failed to allocate BRB\n"));
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
@@ -75,6 +74,7 @@ WinPodsAllocateBrb(
     brb->BrbHeader.Length = (USHORT)brbSize;
 
     *Brb = brb;
+    KdPrint(("WinPodsAAP: Allocated BRB type %d, size %llu\n", BrbType, brbSize));
     return STATUS_SUCCESS;
 }
 
@@ -88,30 +88,50 @@ WinPodsFreeBrb(
     }
 }
 
+/**
+ * WinPodsSubmitBrbSynchronously
+ *
+ * Submits a BRB to the Bluetooth stack using the correct WDF pattern.
+ * Uses WdfIoTargetSendInternalIoctlSynchronously with IOCTL_INTERNAL_BTH_SUBMIT_BRB.
+ */
 NTSTATUS
 WinPodsSubmitBrbSynchronously(
     _In_ PDEVICE_CONTEXT Context,
-    _Inout_ PBRB Brb,
-    _In_ ULONG TimeoutMs
+    _Inout_ PBRB Brb
 )
 {
     NTSTATUS status;
-    IO_STATUS_BLOCK ioStatus = {0};
+    WDF_MEMORY_DESCRIPTOR inputDescriptor;
+    ULONG bytesReturned;
 
-    if (Context->BthInterface.BrbSubmit == NULL) {
-        KdPrint(("WinPodsAAP: BthInterface.BrbSubmit is NULL\n"));
+    if (Context->IoTarget == NULL) {
+        KdPrint(("WinPodsAAP: IoTarget is NULL - driver not properly initialized\n"));
         return STATUS_DEVICE_NOT_READY;
     }
 
-    // Submit BRB using the Bluetooth profile driver interface
-    status = Context->BthInterface.BrbSubmit(
-        Context->BthInterface.Context,
+    // Create a memory descriptor for the BRB
+    WDF_MEMORY_DESCRIPTOR_INIT_BUFFER(
+        &inputDescriptor,
         Brb,
-        &ioStatus
+        Brb->BrbHeader.Length
+    );
+
+    // Submit the BRB via internal IOCTL to the Bluetooth stack
+    // This is the correct pattern per Microsoft's bthecho sample
+    status = WdfIoTargetSendInternalIoctlSynchronously(
+        Context->IoTarget,
+        NULL,                           // Request (NULL = create new)
+        IOCTL_INTERNAL_BTH_SUBMIT_BRB,  // Internal IOCTL code
+        &inputDescriptor,               // Input buffer (BRB)
+        NULL,                           // Output buffer (none)
+        NULL,                           // RequestOptions
+        &bytesReturned                  // Bytes returned
     );
 
     if (!NT_SUCCESS(status)) {
-        KdPrint(("WinPodsAAP: BrbSubmit failed: 0x%08X\n", status));
+        KdPrint(("WinPodsAAP: BRB submission failed: 0x%08X\n", status));
+    } else {
+        KdPrint(("WinPodsAAP: BRB submitted successfully, bytes: %lu\n", bytesReturned));
     }
 
     return status;
@@ -132,11 +152,9 @@ DriverEntry(
 
     KdPrint(("WinPodsAAP: DriverEntry\n"));
 
-    // Initialize WDF driver config
     WDF_DRIVER_CONFIG_INIT(&config, WinPodsEvtDeviceAdd);
     config.EvtDriverContextCleanup = WinPodsEvtDriverContextCleanup;
 
-    // Create the WDF driver object
     status = WdfDriverCreate(
         DriverObject,
         RegistryPath,
@@ -184,34 +202,28 @@ WinPodsEvtDeviceAdd(
 
     KdPrint(("WinPodsAAP: WinPodsEvtDeviceAdd\n"));
 
-    // Set device as exclusive (only one app at a time)
     WdfDeviceInitSetExclusive(DeviceInit, TRUE);
-
-    // Set device characteristics
     WdfDeviceInitSetDeviceType(DeviceInit, FILE_DEVICE_BLUETOOTH);
     WdfDeviceInitSetCharacteristics(DeviceInit, FILE_DEVICE_SECURE_OPEN, FALSE);
 
-    // Register PNP/power callbacks
     WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnpPowerCallbacks);
     pnpPowerCallbacks.EvtDevicePrepareHardware = WinPodsEvtDevicePrepareHardware;
     pnpPowerCallbacks.EvtDeviceReleaseHardware = WinPodsEvtDeviceReleaseHardware;
     WdfDeviceInitSetPnpPowerEventCallbacks(DeviceInit, &pnpPowerCallbacks);
 
-    // Initialize device attributes
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttrs, DEVICE_CONTEXT);
     deviceAttrs.EvtCleanupCallback = WinPodsEvtDeviceContextCleanup;
 
-    // Create the device
     status = WdfDeviceCreate(&DeviceInit, &deviceAttrs, &device);
     if (!NT_SUCCESS(status)) {
         KdPrint(("WinPodsAAP: WdfDeviceCreate failed: 0x%08X\n", status));
         return status;
     }
 
-    // Get device context
     devCtx = GetDeviceContext(device);
     RtlZeroMemory(devCtx, sizeof(DEVICE_CONTEXT));
     devCtx->ConnectionState = WinPodsDisconnected;
+    devCtx->HasBthInterface = FALSE;
 
     // Initialize events
     KeInitializeEvent(&devCtx->ConnectCompleteEvent, NotificationEvent, FALSE);
@@ -224,7 +236,7 @@ WinPodsEvtDeviceAdd(
         return status;
     }
 
-    // Create default IO queue for IOCTL handling
+    // Create default IO queue
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchSequential);
     queueConfig.EvtIoDeviceControl = WinPodsEvtIoDeviceControl;
 
@@ -273,29 +285,65 @@ WinPodsEvtDevicePrepareHardware(
 
     devCtx = GetDeviceContext(Device);
 
-    // Query the Bluetooth profile driver interface from the bus driver
-    // This gives us access to BrbSubmit for L2CAP operations
+    // Get the I/O target for BRB submission
+    // This is used with WdfIoTargetSendInternalIoctlSynchronously
+    devCtx->IoTarget = WdfDeviceGetIoTarget(Device);
+    if (devCtx->IoTarget == NULL) {
+        KdPrint(("WinPodsAAP: Failed to get I/O target\n"));
+        // Continue anyway - we may still be able to function in degraded mode
+    }
+
+    // Query the Bluetooth profile driver interface
+    // This gives us BthAllocateBrb and BthFreeBrb functions
     RtlZeroMemory(&devCtx->BthInterface, sizeof(BTH_PROFILE_DRIVER_INTERFACE));
     devCtx->BthInterface.InterfaceHeader.Size = sizeof(BTH_PROFILE_DRIVER_INTERFACE);
     devCtx->BthInterface.InterfaceHeader.Version = 1;
-    devCtx->BthInterface.InterfaceHeader.Context = (PVOID)Device;
 
-    // Query the interface from the parent bus (Bluetooth driver)
     status = WdfFdoQueryForInterface(
         Device,
         &GUID_BTH_PROFILE_DRIVER_INTERFACE,
         (PINTERFACE)&devCtx->BthInterface,
         sizeof(BTH_PROFILE_DRIVER_INTERFACE),
-        1,  // Version
-        NULL  // InterfaceSpecificData
+        1,
+        NULL
     );
 
     if (!NT_SUCCESS(status)) {
-        KdPrint(("WinPodsAAP: WdfFdoQueryForInterface failed: 0x%08X\n", status));
-        KdPrint(("WinPodsAAP: Note: This driver requires the Bluetooth stack to be available\n"));
-        // Continue anyway - we'll fail operations that need the interface
+        //
+        // IMPORTANT: This is expected when installed as Root\WinPodsAAP!
+        //
+        // The driver is installed as a software device under the Root enumerator,
+        // not under the Bluetooth bus (BTHENUM). This means:
+        // - WdfFdoQueryForInterface will fail because there's no Bluetooth parent
+        // - BRB allocation via BthAllocateBrb will NOT be available
+        // - We'll fall back to our own BRB allocation
+        // - BRB submission via IoTarget may still work if the Bluetooth stack is present
+        //
+        // For production use, this driver should be enumerated under BTHENUM:
+        //   BTHENUM\{E3A4B7F8-1C2D-4A5B-9E6F-0D1A2B3C4D5E}
+        //
+        KdPrint(("WinPodsAAP: =============================================\n"));
+        KdPrint(("WinPodsAAP: BTH_PROFILE_DRIVER_INTERFACE query failed: 0x%08X\n", status));
+        KdPrint(("WinPodsAAP: This is expected for Root\\WinPodsAAP installation.\n"));
+        KdPrint(("WinPodsAAP: The driver will use fallback BRB allocation.\n"));
+        KdPrint(("WinPodsAAP: For full functionality, enumerate under BTHENUM.\n"));
+        KdPrint(("WinPodsAAP: =============================================\n"));
+        devCtx->HasBthInterface = FALSE;
     } else {
         KdPrint(("WinPodsAAP: Successfully queried BTH_PROFILE_DRIVER_INTERFACE\n"));
+        devCtx->HasBthInterface = TRUE;
+    }
+
+    // Allocate receive buffer
+    devCtx->ReceiveBufferSize = RECEIVE_BUFFER_SIZE;
+    devCtx->ReceiveBuffer = ExAllocatePool2(
+        POOL_FLAG_NON_PAGED,
+        devCtx->ReceiveBufferSize,
+        WINPODS_POOL_TAG
+    );
+    if (devCtx->ReceiveBuffer == NULL) {
+        KdPrint(("WinPodsAAP: Failed to allocate receive buffer\n"));
+        // Non-fatal
     }
 
     return STATUS_SUCCESS;
@@ -315,9 +363,13 @@ WinPodsEvtDeviceReleaseHardware(
 
     devCtx = GetDeviceContext(Device);
 
-    // Disconnect if still connected
     if (devCtx->ConnectionState != WinPodsDisconnected) {
         WinPodsDisconnectL2CAP(devCtx);
+    }
+
+    if (devCtx->ReceiveBuffer != NULL) {
+        ExFreePoolWithTag(devCtx->ReceiveBuffer, WINPODS_POOL_TAG);
+        devCtx->ReceiveBuffer = NULL;
     }
 
     return STATUS_SUCCESS;
@@ -332,9 +384,13 @@ WinPodsEvtDeviceContextCleanup(
 
     KdPrint(("WinPodsAAP: Device cleanup\n"));
 
-    // Disconnect if connected
     if (devCtx->ConnectionState != WinPodsDisconnected) {
         WinPodsDisconnectL2CAP(devCtx);
+    }
+
+    if (devCtx->ReceiveBuffer != NULL) {
+        ExFreePoolWithTag(devCtx->ReceiveBuffer, WINPODS_POOL_TAG);
+        devCtx->ReceiveBuffer = NULL;
     }
 }
 
@@ -385,11 +441,10 @@ WinPodsEvtIoDeviceControl(
         input = (PWINPODS_CONNECT_INPUT)inBuffer;
         output = (PWINPODS_CONNECT_OUTPUT)outBuffer;
 
-        // Connect to L2CAP
         status = WinPodsConnectL2CAP(devCtx, input->BluetoothAddress, input->PSM);
 
         output->Success = NT_SUCCESS(status) ? 1 : 0;
-        output->ChannelId = (USHORT)(ULONG_PTR)devCtx->ChannelHandle;
+        output->ChannelId = 0;  // Channel handle is internal
         bytesReturned = sizeof(WINPODS_CONNECT_OUTPUT);
 
         if (NT_SUCCESS(status)) {
@@ -467,7 +522,6 @@ WinPodsEvtIoDeviceControl(
         output->ErrorCode = status;
         bytesReturned = sizeof(WINPODS_RECEIVE_OUTPUT) + (ULONG)bytesReceived;
 
-        // Return success even if receive failed (error code is in output)
         if (!NT_SUCCESS(status)) {
             bytesReturned = sizeof(WINPODS_RECEIVE_OUTPUT);
             status = STATUS_SUCCESS;
@@ -542,6 +596,10 @@ WinPodsL2capIndicationCallback(
     case L2CAP_CHANNEL_CLOSED:
         KdPrint(("WinPodsAAP: Channel closed\n"));
         break;
+
+    default:
+        KdPrint(("WinPodsAAP: Unknown indication: %lu\n", Indication));
+        break;
     }
 }
 
@@ -562,23 +620,21 @@ WinPodsConnectL2CAP(
 
     KdPrint(("WinPodsAAP: Connecting to %012llX on PSM 0x%04X\n", RemoteAddress, PSM));
 
-    // Check if we have the Bluetooth interface
-    if (Context->BthInterface.BrbSubmit == NULL) {
-        KdPrint(("WinPodsAAP: No Bluetooth interface available\n"));
+    // Check IoTarget
+    if (Context->IoTarget == NULL) {
+        KdPrint(("WinPodsAAP: No I/O target available\n"));
         return STATUS_DEVICE_NOT_READY;
     }
 
-    // Check if already connected
     if (Context->ConnectionState == WinPodsConnected) {
         if (Context->RemoteAddress == RemoteAddress) {
-            return STATUS_SUCCESS; // Already connected to same device
+            return STATUS_SUCCESS;
         }
-        // Disconnect from previous device
         WinPodsDisconnectL2CAP(Context);
     }
 
-    // Allocate BRB for open channel
-    if (Context->BthInterface.BthAllocateBrb != NULL) {
+    // Allocate BRB
+    if (Context->HasBthInterface && Context->BthInterface.BthAllocateBrb != NULL) {
         brb = Context->BthInterface.BthAllocateBrb(BRB_L2CA_OPEN_CHANNEL, NULL);
     } else {
         status = WinPodsAllocateBrb(BRB_L2CA_OPEN_CHANNEL, &brb);
@@ -597,30 +653,33 @@ WinPodsConnectL2CAP(
     openBrb->BtAddress = RemoteAddress;
     openBrb->Psm = PSM;
 
-    // Channel configuration - outbound
-    openBrb->ConfigOut.Flags = CF_FLUSHABLE;
-    openBrb->ConfigOut.FlushTO = 0xFFFF;
+    // Channel configuration using the union structure
+    // The BRB_L2CA_OPEN_CHANNEL has a union with Params.Client / Params.Server
+    // For client connections, use Params.Client
+    openBrb->Params.Client.ConfigOut.Flags = CF_FLUSHABLE;
+    openBrb->Params.Client.ConfigOut.FlushTO = 0xFFFF;
+    openBrb->Params.Client.ConfigOut.MaxMtu = 1024;
+    openBrb->Params.Client.ConfigOut.MinMtu = 48;
+    openBrb->Params.Client.ConfigOut.Mtu = 1024;
 
-    // MTU settings
-    openBrb->ConfigOut.MaxMtu = 1024;
-    openBrb->ConfigOut.MinMtu = 48;
-    openBrb->ConfigOut.Mtu = 1024;
+    openBrb->Params.Client.ConfigIn.Flags = CF_FLUSHABLE;
+    openBrb->Params.Client.ConfigIn.FlushTO = 0xFFFF;
+    openBrb->Params.Client.ConfigIn.MaxMtu = 1024;
+    openBrb->Params.Client.ConfigIn.MinMtu = 48;
+    openBrb->Params.Client.ConfigIn.Mtu = 1024;
 
-    // Inbound channel configuration
-    openBrb->ConfigIn.Flags = CF_FLUSHABLE;
-    openBrb->ConfigIn.FlushTO = 0xFFFF;
-    openBrb->ConfigIn.MaxMtu = 1024;
-    openBrb->ConfigIn.MinMtu = 48;
-    openBrb->ConfigIn.Mtu = 1024;
+    openBrb->Params.Client.ExtraOptions = NULL;
+    openBrb->Params.Client.NumExtraOptions = 0;
+    openBrb->Params.Client.LinkTO = 0;
 
-    // Register indication callback for remote disconnect notifications
-    openBrb->IndicationCallback = WinPodsL2capIndicationCallback;
-    openBrb->IndicationCallbackContext = Context;
-    openBrb->IndicationFlags = 0;
+    // Register indication callback
+    openBrb->Params.Client.IndicationCallback = WinPodsL2capIndicationCallback;
+    openBrb->Params.Client.IndicationCallbackContext = Context;
+    openBrb->Params.Client.IndicationFlags = 0;
 
     // Initialize output fields
-    openBrb->ChannelHandle = NULL;
-    openBrb->ConnectStatus = STATUS_UNSUCCESSFUL;
+    openBrb->Params.Client.ChannelHandle = NULL;
+    openBrb->Params.Client.ConnectStatus = STATUS_UNSUCCESSFUL;
 
     // Update context state
     WdfSpinLockAcquire(Context->Lock);
@@ -629,22 +688,19 @@ WinPodsConnectL2CAP(
     Context->PSM = PSM;
     WdfSpinLockRelease(Context->Lock);
 
-    // Submit BRB
-    status = WinPodsSubmitBrbSynchronously(Context, brb, DEFAULT_CONNECT_TIMEOUT_MS);
+    // Submit BRB using the correct WDF pattern
+    status = WinPodsSubmitBrbSynchronously(Context, brb);
 
     if (NT_SUCCESS(status)) {
-        // Check connection status from BRB
-        status = openBrb->ConnectStatus;
+        status = openBrb->Params.Client.ConnectStatus;
 
         if (NT_SUCCESS(status)) {
-            // Connection successful
             WdfSpinLockAcquire(Context->Lock);
-            Context->ChannelHandle = openBrb->ChannelHandle;
+            Context->ChannelHandle = openBrb->Params.Client.ChannelHandle;
             Context->ConnectionState = WinPodsConnected;
             WdfSpinLockRelease(Context->Lock);
 
-            KdPrint(("WinPodsAAP: Connected successfully, ChannelHandle: 0x%p\n",
-                     Context->ChannelHandle));
+            KdPrint(("WinPodsAAP: Connected successfully\n"));
         } else {
             KdPrint(("WinPodsAAP: Connection failed with status: 0x%08X\n", status));
             WdfSpinLockAcquire(Context->Lock);
@@ -663,7 +719,7 @@ WinPodsConnectL2CAP(
     }
 
     // Free BRB
-    if (Context->BthInterface.BthFreeBrb != NULL) {
+    if (Context->HasBthInterface && Context->BthInterface.BthFreeBrb != NULL) {
         Context->BthInterface.BthFreeBrb(brb);
     } else {
         WinPodsFreeBrb(brb);
@@ -687,9 +743,7 @@ WinPodsDisconnectL2CAP(
         return STATUS_SUCCESS;
     }
 
-    // Check if we have the Bluetooth interface and a valid channel
-    if (Context->BthInterface.BrbSubmit == NULL || Context->ChannelHandle == NULL) {
-        // No interface or channel, just clear state
+    if (Context->IoTarget == NULL || Context->ChannelHandle == NULL) {
         WdfSpinLockAcquire(Context->Lock);
         Context->ConnectionState = WinPodsDisconnected;
         Context->ChannelHandle = NULL;
@@ -699,13 +753,12 @@ WinPodsDisconnectL2CAP(
         return STATUS_SUCCESS;
     }
 
-    // Allocate BRB for close channel
-    if (Context->BthInterface.BthAllocateBrb != NULL) {
+    // Allocate BRB
+    if (Context->HasBthInterface && Context->BthInterface.BthAllocateBrb != NULL) {
         brb = Context->BthInterface.BthAllocateBrb(BRB_L2CA_CLOSE_CHANNEL, NULL);
     } else {
         status = WinPodsAllocateBrb(BRB_L2CA_CLOSE_CHANNEL, &brb);
         if (!NT_SUCCESS(status)) {
-            // Failed to allocate, just clear state
             WdfSpinLockAcquire(Context->Lock);
             Context->ConnectionState = WinPodsDisconnected;
             Context->ChannelHandle = NULL;
@@ -728,22 +781,21 @@ WinPodsDisconnectL2CAP(
 
     closeBrb = (struct _BRB_L2CA_CLOSE_CHANNEL*)brb;
     closeBrb->ChannelHandle = Context->ChannelHandle;
+    closeBrb->CloseStatus = STATUS_SUCCESS;
 
-    // Submit BRB
-    status = WinPodsSubmitBrbSynchronously(Context, brb, DEFAULT_CONNECT_TIMEOUT_MS);
+    status = WinPodsSubmitBrbSynchronously(Context, brb);
 
     if (!NT_SUCCESS(status)) {
         KdPrint(("WinPodsAAP: Close channel BRB failed: 0x%08X\n", status));
     }
 
     // Free BRB
-    if (Context->BthInterface.BthFreeBrb != NULL) {
+    if (Context->HasBthInterface && Context->BthInterface.BthFreeBrb != NULL) {
         Context->BthInterface.BthFreeBrb(brb);
     } else {
         WinPodsFreeBrb(brb);
     }
 
-    // Clear state
     WdfSpinLockAcquire(Context->Lock);
     Context->ConnectionState = WinPodsDisconnected;
     Context->ChannelHandle = NULL;
@@ -771,7 +823,7 @@ WinPodsSendData(
         return STATUS_DEVICE_NOT_CONNECTED;
     }
 
-    if (Context->BthInterface.BrbSubmit == NULL) {
+    if (Context->IoTarget == NULL) {
         return STATUS_DEVICE_NOT_READY;
     }
 
@@ -781,8 +833,8 @@ WinPodsSendData(
 
     KdPrint(("WinPodsAAP: Sending %llu bytes\n", BufferSize));
 
-    // Allocate BRB for ACL transfer
-    if (Context->BthInterface.BthAllocateBrb != NULL) {
+    // Allocate BRB
+    if (Context->HasBthInterface && Context->BthInterface.BthAllocateBrb != NULL) {
         brb = Context->BthInterface.BthAllocateBrb(BRB_L2CA_ACL_TRANSFER, NULL);
     } else {
         status = WinPodsAllocateBrb(BRB_L2CA_ACL_TRANSFER, &brb);
@@ -797,22 +849,20 @@ WinPodsSendData(
 
     aclBrb = (struct _BRB_L2CA_ACL_TRANSFER*)brb;
 
-    // Initialize BRB for ACL transfer (outbound)
     aclBrb->ChannelHandle = Context->ChannelHandle;
     aclBrb->TransferFlags = ACL_TRANSFER_DIRECTION_OUT;
     aclBrb->Buffer = Buffer;
     aclBrb->BufferSize = (ULONG)BufferSize;
-    aclBrb->Timeout = TimeoutMs > 0 ? TimeoutMs : DEFAULT_TRANSFER_TIMEOUT_MS;
+    aclBrb->Timeout = TimeoutMs > 0 ? TimeoutMs : DEFAULT_TIMEOUT_MS;
 
-    // Submit BRB
-    status = WinPodsSubmitBrbSynchronously(Context, brb, aclBrb->Timeout);
+    status = WinPodsSubmitBrbSynchronously(Context, brb);
 
     if (!NT_SUCCESS(status)) {
         KdPrint(("WinPodsAAP: Send failed: 0x%08X\n", status));
     }
 
     // Free BRB
-    if (Context->BthInterface.BthFreeBrb != NULL) {
+    if (Context->HasBthInterface && Context->BthInterface.BthFreeBrb != NULL) {
         Context->BthInterface.BthFreeBrb(brb);
     } else {
         WinPodsFreeBrb(brb);
@@ -840,7 +890,7 @@ WinPodsReceiveData(
         return STATUS_DEVICE_NOT_CONNECTED;
     }
 
-    if (Context->BthInterface.BrbSubmit == NULL) {
+    if (Context->IoTarget == NULL) {
         return STATUS_DEVICE_NOT_READY;
     }
 
@@ -850,8 +900,8 @@ WinPodsReceiveData(
 
     KdPrint(("WinPodsAAP: Receiving up to %llu bytes\n", BufferSize));
 
-    // Allocate BRB for ACL transfer
-    if (Context->BthInterface.BthAllocateBrb != NULL) {
+    // Allocate BRB
+    if (Context->HasBthInterface && Context->BthInterface.BthAllocateBrb != NULL) {
         brb = Context->BthInterface.BthAllocateBrb(BRB_L2CA_ACL_TRANSFER, NULL);
     } else {
         status = WinPodsAllocateBrb(BRB_L2CA_ACL_TRANSFER, &brb);
@@ -866,15 +916,13 @@ WinPodsReceiveData(
 
     aclBrb = (struct _BRB_L2CA_ACL_TRANSFER*)brb;
 
-    // Initialize BRB for ACL transfer (inbound)
     aclBrb->ChannelHandle = Context->ChannelHandle;
     aclBrb->TransferFlags = ACL_TRANSFER_DIRECTION_IN;
     aclBrb->Buffer = Buffer;
     aclBrb->BufferSize = (ULONG)BufferSize;
-    aclBrb->Timeout = TimeoutMs > 0 ? TimeoutMs : DEFAULT_TRANSFER_TIMEOUT_MS;
+    aclBrb->Timeout = TimeoutMs > 0 ? TimeoutMs : DEFAULT_TIMEOUT_MS;
 
-    // Submit BRB
-    status = WinPodsSubmitBrbSynchronously(Context, brb, aclBrb->Timeout);
+    status = WinPodsSubmitBrbSynchronously(Context, brb);
 
     if (NT_SUCCESS(status)) {
         *BytesReceived = aclBrb->BufferSize;
@@ -884,7 +932,7 @@ WinPodsReceiveData(
     }
 
     // Free BRB
-    if (Context->BthInterface.BthFreeBrb != NULL) {
+    if (Context->HasBthInterface && Context->BthInterface.BthFreeBrb != NULL) {
         Context->BthInterface.BthFreeBrb(brb);
     } else {
         WinPodsFreeBrb(brb);
